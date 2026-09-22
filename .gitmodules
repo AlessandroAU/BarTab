@@ -1,0 +1,3 @@
+[submodule "vendor/clay-widgets"]
+	path = vendor/clay-widgets
+	url = https://github.com/AlessandroAU/clay-widgets

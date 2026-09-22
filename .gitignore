@@ -1,0 +1,7 @@
+bin/
+obj/
+.vs/
+build/
+build-*/
+CMakeUserPresets.json
+third_party/
