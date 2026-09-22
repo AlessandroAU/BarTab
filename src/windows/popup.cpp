@@ -63,7 +63,7 @@ void App::close_details() {
     if (GetCapture() == popup_)
         ReleaseCapture();
     ShowWindow(popup_, SW_HIDE);
-    hide_hover();
+    unpin_hover();
     cancel_settings_preview();
 }
 
@@ -75,7 +75,7 @@ void App::render_details(ClayWidgets_Input input) {
     if (rect.right <= 0 || rect.bottom <= 0)
         return;
     const float scale = popup_scale();
-    renderer_.set_scale(scale);
+    renderer_.set_surface(scale, details_view_.text_gamma());
     if (details_scale_ != scale) {
         details_view_.invalidate_measurements();
         details_scale_ = scale;
@@ -198,6 +198,27 @@ void App::details_event(HWND window, UINT message, WPARAM w, LPARAM l) {
         ReleaseCapture();
 }
 
+// Slides the settings window left, then up, so it never covers the pinned hover card.
+void App::avoid_hover(int& x, int& y, int width, int height, const RECT& work) const {
+    if (!hover_pinned_ || !hover_ || !IsWindowVisible(hover_))
+        return;
+    RECT card{};
+    GetWindowRect(hover_, &card);
+    const int gap = 8;
+    auto overlaps = [&] {
+        return x < card.right + gap && x + width > card.left - gap && y < card.bottom + gap &&
+               y + height > card.top - gap;
+    };
+    if (!overlaps())
+        return;
+    if (card.left - gap - width >= work.left)
+        x = card.left - gap - width;
+    else if (card.right + gap + width <= work.right)
+        x = card.right + gap;
+    if (overlaps())
+        y = std::max(static_cast<int>(work.top), static_cast<int>(card.top) - gap - height);
+}
+
 void App::open_details(bool settings) {
     settings = settings || usage_.live;
     hide_hover();
@@ -244,12 +265,16 @@ void App::open_details(bool settings) {
         settings ? monitor.rcWork.left + (monitor.rcWork.right - monitor.rcWork.left - width) / 2
                  : std::max(static_cast<int>(monitor.rcWork.left),
                             std::min(anchor.right() - width, static_cast<int>(monitor.rcWork.right) - width));
-    const int y =
-        settings
-            ? monitor.rcWork.top + (monitor.rcWork.bottom - monitor.rcWork.top - height) / 2
-            : std::max(static_cast<int>(monitor.rcWork.top),
-                       std::min(anchor.y - height - 8, static_cast<int>(monitor.rcWork.bottom) - height));
-    SetWindowPos(popup_, HWND_TOPMOST, x, y, width, height, SWP_NOACTIVATE);
+    int y = settings
+                ? monitor.rcWork.top + (monitor.rcWork.bottom - monitor.rcWork.top - height) / 2
+                : std::max(static_cast<int>(monitor.rcWork.top),
+                           std::min(anchor.y - height - 8, static_cast<int>(monitor.rcWork.bottom) - height));
+    int left = x;
+    if (settings) {
+        pin_hover();
+        avoid_hover(left, y, width, height, monitor.rcWork);
+    }
+    SetWindowPos(popup_, HWND_TOPMOST, left, y, width, height, SWP_NOACTIVATE);
     render_details(details_pointer_);
     ShowWindow(popup_, SW_SHOW);
     SetForegroundWindow(popup_);

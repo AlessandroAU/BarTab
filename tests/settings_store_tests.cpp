@@ -41,7 +41,7 @@ int main() {
         check(read_settings({}) == Preferences{}, "Empty load path uses defaults");
         check(!write_settings({}, {}), "Empty save path fails");
         Preferences saved;
-        saved.appearance = {230, 2, 1, 1, 270, 480, 73, 350, 5, 4, 37, false, false};
+        saved.appearance = {230, 120, 270, 73, 350, 5, 4, 37, false, false};
         saved.codex_enabled = false;
         saved.claude_enabled = false;
         saved.codex_interval = 45;
@@ -78,11 +78,13 @@ int main() {
         }
         const auto loaded = read_settings(invalid);
         check(loaded.appearance.text_percent == 300 && loaded.appearance.widget_width == 100 &&
-                  loaded.appearance.font == 2 && loaded.codex_interval == 15 && loaded.claude_interval == 900,
+                  loaded.codex_interval == 15 && loaded.claude_interval == 900,
               "Out-of-range file values are clamped");
+        check(loaded.appearance.hover_text_percent == 300,
+              "Files saved before the hover text size reuse the taskbar text size");
         check(loaded.appearance.hover_opacity >= 50 && loaded.appearance.hover_opacity <= 100,
               "Malformed numbers produce a valid preference");
-        check(loaded.appearance.hover_width == Preferences{}.appearance.hover_width && loaded.codex_enabled,
+        check(loaded.codex_enabled,
               "Missing keys retain defaults");
         std::cout << "Settings persistence and failure handling passed\n";
         return 0;

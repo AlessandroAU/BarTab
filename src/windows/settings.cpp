@@ -57,9 +57,11 @@ void App::apply_preferences(Preferences value) {
     apply_view_preferences();
     apply_providers();
     if (!value.appearance.hover_enabled)
-        hide_hover();
+        hide_hover(true);
     tick();
     update_usage();
+    if (hover_pinned_ && !IsWindowVisible(hover_))
+        show_hover();
 }
 void App::apply_view_preferences() {
     widget_view_.set_preferences(preferences_);

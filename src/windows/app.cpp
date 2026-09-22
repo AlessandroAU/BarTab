@@ -16,12 +16,7 @@ App::App(bool smoke, bool live_test) : smoke_(smoke), demo_mode_(smoke), live_te
                         0, 0, nullptr, nullptr, GetModuleHandleW(nullptr), this);
     if (!controller_)
         throw std::runtime_error("Could not create controller window");
-    wchar_t windows_directory[MAX_PATH]{};
-    if (GetWindowsDirectoryW(windows_directory, MAX_PATH)) {
-        const auto fonts = std::filesystem::path(windows_directory) / L"Fonts";
-        renderer_.load_font(1, fonts / L"segoeui.ttf");
-        renderer_.load_font(2, fonts / L"consola.ttf");
-    }
+    update_system_font();
     load_settings();
     usage_.live = !smoke;
     if (!smoke) {
@@ -34,6 +29,17 @@ App::App(bool smoke, bool live_test) : smoke_(smoke), demo_mode_(smoke), live_te
     if (!SetTimer(controller_, 1, 500, nullptr))
         throw std::runtime_error("Could not create update timer");
     log(L"Started native prototype; PID " + std::to_wstring(GetCurrentProcessId()));
+}
+
+void App::update_system_font() {
+    if (!renderer_.load_font_data(1, windows_ui_font()))
+        return;
+    widget_view_.invalidate_measurements();
+    hover_view_.invalidate_measurements();
+    details_view_.invalidate_measurements();
+    if (IsWindowVisible(popup_)) render_details(details_pointer_);
+    if (IsWindowVisible(hover_)) show_hover();
+    if (widget_) InvalidateRect(widget_, nullptr, FALSE);
 }
 
 App::~App() {
@@ -88,6 +94,7 @@ LRESULT CALLBACK App::controller_proc(HWND window, UINT message, WPARAM w, LPARA
     auto* app = instance(window, message, l);
     if (app) {
         if (message == WM_SETTINGCHANGE || message == WM_THEMECHANGED || message == WM_SYSCOLORCHANGE) {
+            app->update_system_font();
             app->tick();
             if (app->widget_)
                 InvalidateRect(app->widget_, nullptr, FALSE);

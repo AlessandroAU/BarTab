@@ -6,7 +6,7 @@ It reads usage from the Codex and Claude CLIs you already have installed and sig
 
 ![The widget embedded in the taskbar](docs/images/taskbar-widget.png)
 
-Hover for a compact card with every reported allowance window and its local reset time:
+Hover for a compact card with every reported allowance window and its reset countdown or local reset time:
 
 ![The hover card](docs/images/hover-card.png)
 
@@ -16,7 +16,7 @@ Click the widget, or the tray icon, for settings and full usage detail:
 
 ## Build and run
 
-Requires Visual Studio 2022 (Desktop development with C++), a Windows SDK, and CMake 3.22+. Every dependency and the UI font is vendored, so builds need no network access. At runtime you need Windows system DLLs and an OpenGL 3.3-capable driver — no .NET and no Visual C++ redistributable, since the MSVC runtime and all libraries are linked statically.
+Requires Visual Studio 2022 (Desktop development with C++), a Windows SDK, and CMake 3.22+. Every dependency and a fallback font are vendored, so builds need no network access. At runtime you need Windows system DLLs and an OpenGL 3.3-capable driver — no .NET and no Visual C++ redistributable, since the MSVC runtime and all libraries are linked statically.
 
 ```powershell
 .\build.bat   # configure, compile, run the tests, install to bin\
@@ -39,35 +39,35 @@ Live usage needs a separately installed, signed-in Codex and/or Claude CLI.
 ## Using it
 
 - **Click** the widget — anywhere in its rectangle, including the transparent gaps — or the tray icon to open the settings and usage panel.
-- **Hover** it for the usage card. The card never takes focus and closes on leave or click.
+- **Hover** it for the usage card. The card never takes focus, stays open while the pointer is over it, and closes after a short grace period when you leave. Click the taskbar widget to open details. While Settings is open the card stays pinned above the widget so hover changes preview live; the settings window moves aside if the two would overlap.
 - **Right-click** the widget or tray icon for Settings, **Start at boot**, and Quit. Start at boot registers the current executable path under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`; move the EXE and you need to toggle it off and on again.
 - **Keyboard**: Tab / Shift+Tab moves focus, arrows adjust sliders, Enter activates, Escape closes.
 
-Settings has two independently scrolling panels — **Appearance** and **Providers** — over one fixed button row. Changes preview live; **Save settings** writes `%LOCALAPPDATA%\UsageTracker\settings.ini`, and Cancel, Escape or closing the window restores what was saved.
+Settings has two independently scrolling panels — **Appearance** and **Providers** — with grouped Taskbar and Hover card controls, each with its own text size. Reset appearance stays below Appearance, Refresh sits beside Usage Remaining, and Save/Cancel stay in the footer. Changes preview live; **Save settings** writes `%LOCALAPPDATA%\UsageTracker\settings.ini`, and Cancel, Escape or closing the window restores what was saved.
 
 ### Appearance
 
 | Setting | Range | Default |
 | --- | --- | --- |
-| Text size | 100–300% | 150% |
-| Font | Roboto, Segoe UI, Consolas | Roboto |
-| Accent | Teal, Blue, Purple | Teal |
-| Theme | Midnight, Slate | Midnight |
+| Taskbar text size | 100–300% | 150% |
 | Widget width | 100–400 px | 150 px |
 | Taskbar position | 0–100% from left | 100% |
 | Bar thickness | 3–9 px | 7 px |
 | Corner radius | 0–12 px | 10 px |
 | Hover card | on / off, 240–600 px wide | on, 360 px |
+| Hover text size | 100–300% | 150% (copies Taskbar text size from older settings files) |
 | Hover opacity | 50–100% | 95% |
-| Hover delay | 50–1500 ms | 50 ms |
+| Hover delay | 50–1500 ms | 250 ms |
 
-Dimensions are logical pixels, before text and DPI scaling. Above 160% text, the taskbar rows sit side by side so large text still fits the taskbar height. **Reset appearance to defaults** leaves provider settings alone.
+Colors and the UI font follow Windows automatically. The application uses Windows app light/dark mode and accent color; the taskbar follows the separate Windows system mode. The font comes from the Windows UI message-font configuration and updates when Windows broadcasts a settings change. Provider colors stay distinct. Older saved Font, Theme, Accent, and HoverWidth keys are ignored. Text size remains adjustable.
+
+Dimensions are logical pixels, before text and DPI scaling. The taskbar first tightens padding and gaps to keep your requested text size. Compact spacing lets two rows stay stacked up to 180%; larger text uses side-by-side rows to fit the taskbar height. If the requested size still cannot fit a free taskbar gap, the widget uses the largest text size that fits and restores the requested size and roomier spacing when space becomes available; the hover card keeps its own text size regardless. **Reset appearance to defaults** leaves provider settings alone.
 
 **Taskbar position** slides the widget along the taskbar: 0% is hard left, 50% centred, 100% hard right. The slider names the spot you want, and the widget takes the closest one it can actually reach — it lands in whichever run of free space gets nearest, so it can sit up against a taskbar button but never underneath one. Free space is recomputed as buttons come and go, so this is a preference rather than a fixed coordinate: on a busy taskbar only one gap may be wide enough, and every position resolves to it.
 
 ### Providers
 
-Codex and Claude are always listed, including ones that are disabled or not installed. Each card shows detection status, executable path, plan, every reported allowance window with its reset time, the last successful update, and the full text of the last error.
+Codex and Claude are always listed, including ones that are disabled or not installed. Each card shows an enable switch, connection status, plan, update age, and every reported usage window with its reset time. Connection details expands to show the executable path and exact last update; errors stay visible.
 
 Each provider has its own enable toggle and update interval (15 s, 30 s, or 1, 2, 5, 10, 15 minutes; 1 minute by default). Disabling one stops its polling but keeps its last readings inspectable. **Refresh usage and detection** rechecks installations and refreshes enabled providers immediately.
 
@@ -83,7 +83,7 @@ Reset times appear as `DD/MM HH:MM`, shortened to `DD/MM` on the paired row and 
 
 Raylib owns a single hidden OpenGL context and draws Clay commands into cached offscreen textures; Windows then presents those pixels in native windows. GDI only blits. The tray, context menu and title bar stay native OS surfaces.
 
-There is **no game loop**. Animations are off, and redraws happen only on input, value changes, DPI or geometry changes. An unchanged placement tick does not repaint, and the hidden popup has no timer. The tradeoff is that each redraw copies pixels from GPU to CPU; for surfaces this small that is an integration choice, not a measured battery win.
+There is **no game loop**. Animations are off, and redraws happen on input, value changes, DPI or geometry changes, plus once a minute while the hover card is visible to update countdowns. An unchanged placement tick does not repaint, and the hidden popup has no timer. The tradeoff is that each redraw copies pixels from GPU to CPU; for surfaces this small that is an integration choice, not a measured battery win.
 
 The taskbar bitmap uses a background alpha of 1/255, so it looks transparent but keeps a full rectangular click target. A worker thread finds unoccupied taskbar space via UI Automation; the widget hides when no gap fits and is recreated if its parent disappears. There is no reserved taskbar space, so a newly appearing button can overlap briefly between snapshots.
 

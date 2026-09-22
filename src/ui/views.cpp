@@ -8,8 +8,8 @@
 
 namespace usage::ui {
 namespace {
-constexpr uint16_t settings_body = 16;
-constexpr uint16_t settings_help = 14;
+constexpr uint16_t settings_body = 18;
+constexpr uint16_t settings_help = 16;
 Clay_String string(const char* text) {
     return {false, static_cast<int32_t>(std::strlen(text)), text};
 }
@@ -45,6 +45,40 @@ std::string date(std::int64_t timestamp) {
     return std::string(buffer);
 }
 
+std::string hover_reset(std::int64_t timestamp, std::int64_t now) {
+    if (timestamp <= 0)
+        return "Reset unavailable";
+    const auto seconds = timestamp - now;
+    if (seconds <= 0)
+        return "Reset due - awaiting update";
+    if (seconds < 86400) {
+        const auto minutes = (seconds + 59) / 60;
+        return "Resets in " + (minutes >= 60 ? std::to_string(minutes / 60) + "h " : "") +
+               std::to_string(minutes % 60) + "m";
+    }
+    const auto time = static_cast<std::time_t>(timestamp);
+    std::tm local{};
+#ifdef _WIN32
+    if (localtime_s(&local, &time))
+        return "Reset unavailable";
+#else
+    if (!localtime_r(&time, &local))
+        return "Reset unavailable";
+#endif
+    char buffer[40]{};
+    std::strftime(buffer, sizeof(buffer), seconds < 7 * 86400 ? "%a, %H:%M" : "%d %b, %H:%M", &local);
+    return std::string("Resets ") + buffer;
+}
+std::string freshness(std::int64_t updated, std::int64_t now) {
+    if (updated <= 0)
+        return "Not updated yet";
+    const auto minutes = std::max<std::int64_t>(0, now - updated) / 60;
+    if (!minutes)
+        return "Updated just now";
+    return "Updated " + std::to_string(minutes < 60 ? minutes : minutes < 1440 ? minutes / 60 : minutes / 1440) +
+           (minutes < 60 ? "m ago" : minutes < 1440 ? "h ago" : "d ago");
+}
+
 std::string reset_time(std::int64_t timestamp, bool date_only = false, bool day_key = false) {
     if (timestamp <= 0)
         return "?";
@@ -64,51 +98,58 @@ std::string reset_time(std::int64_t timestamp, bool date_only = false, bool day_
 
 } // namespace
 Clay_Color View::accent_color() const {
-    static constexpr Clay_Color colors[] = {{90, 218, 184, 255}, {105, 175, 255, 255}, {193, 153, 255, 255}};
-    return colors[preferences_.appearance.accent];
+    return color(system_accent_);
+}
+bool View::light_theme() const {
+    return system_light_;
+}
+Clay_Color View::text_color(Clay_Color tint) const {
+    if (!light_theme()) return tint;
+    // Keep provider and semantic colors; translate the neutral dark-theme text palette.
+    if (tint.r == 236 && tint.g == 236) return {35, 35, 40, 255};
+    if (tint.r > 230 && tint.g > 230 && tint.b > 230) return {28, 28, 28, 255};
+    if (tint.b > tint.r && tint.g >= 150) return {82, 88, 96, 255};
+    if (tint.r == 240 && tint.g == 180) return {145, 86, 0, 255};
+    return tint;
 }
 Clay_Color View::background_color() const {
-    return preferences_.appearance.theme == 0 ? Clay_Color{19, 25, 34, 255} : Clay_Color{35, 40, 49, 255};
+    if (light_theme()) return {243, 243, 243, 255};
+    return {32, 32, 32, 255};
 }
 Clay_Color View::provider_color(const char* name, bool secondary) const {
     if (std::strstr(name, "Claude"))
         return secondary ? Clay_Color{232, 171, 145, 255} : Clay_Color{217, 119, 87, 255};
     if (std::strstr(name, "Codex"))
-        return surface_ == Surface::Widget && system_light_ ? Clay_Color{35, 35, 40, 255}
+        return light_theme() ? Clay_Color{35, 35, 40, 255}
                                                             : Clay_Color{236, 236, 241, 255};
     return accent_color();
 }
 void View::wrapped_text(const std::string& value, uint16_t size, Clay_Color tint) {
     Clay_TextElementConfig config{};
     config.fontSize = size;
-    config.textColor = tint;
+    config.fontId = 1;    config.textColor = text_color(tint);
     config.wrapMode = CLAY_TEXT_WRAP_WORDS;
     CLAY_TEXT(string(label(value)), config);
 }
 bool View::setting_slider(const char* name, const char* title, int& value, SettingRange range,
                           const char* unit) {
-    text(label(std::string(title) + ": " + std::to_string(value) + unit), settings_body,
-         {210, 220, 234, 255});
+    auto heading = column(0, 4);
+    heading.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    CLAY_AUTO_ID (heading) {
+        text(title, settings_body, {210, 220, 234, 255});
+        auto spacer = column(0, 0);
+        CLAY_AUTO_ID (spacer) {}
+        text(label(std::to_string(value) + unit), settings_help, {157, 174, 193, 255});
+    }
     float current = static_cast<float>(value);
     ClayWidgets_SliderOptions options{};
     options.minValue = static_cast<float>(range.min);
     options.maxValue = static_cast<float>(range.max);
     options.step = static_cast<float>(range.step);
+    options.showThumb = true;
     if (!ClayWidgets_Slider(widgets_.get(), id(name), &current, options))
         return false;
     value = static_cast<int>(std::lround(current));
-    return true;
-}
-bool View::choice_dropdown(const char* name, const char* title, const char* const* choices, int count,
-                           int& value) {
-    std::vector<Clay_String> items;
-    for (int i = 0; i < count; ++i)
-        items.push_back(string(choices[i]));
-    int32_t selected = value;
-    text(title, settings_body, {210, 220, 234, 255});
-    if (!ClayWidgets_Combo(widgets_.get(), id(name), CLAY_STRING(""), items.data(), count, &selected))
-        return false;
-    value = selected;
     return true;
 }
 bool View::interval_dropdown(const char* name, int& seconds) {
@@ -135,6 +176,7 @@ bool View::interval_dropdown(const char* name, int& seconds) {
     return true;
 }
 void View::settings_panel(const Usage& data, Frame& result, ClayWidgets_Input input) {
+    const auto now = reference_time_ ? reference_time_ : static_cast<std::int64_t>(std::time(nullptr));
     auto root = column(16, 14);
     root.layout.sizing.height = CLAY_SIZING_GROW(0);
     root.backgroundColor = background_color();
@@ -144,7 +186,7 @@ void View::settings_panel(const Usage& data, Frame& result, ClayWidgets_Input in
         heading.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
         CLAY (CLAY_ID("SettingsHeading"), heading) {
             text("Settings", 24, {236, 243, 250, 255});
-            text("Live preview / Cancel restores saved settings", settings_help, {166, 187, 208, 255});
+            text("Changes preview live. Cancel restores saved settings.", settings_help, {166, 187, 208, 255});
         }
         auto panels = column(0, 16);
         panels.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
@@ -154,7 +196,12 @@ void View::settings_panel(const Usage& data, Frame& result, ClayWidgets_Input in
             appearance.layout.sizing.width = CLAY_SIZING_FIXED(330);
             appearance.layout.sizing.height = CLAY_SIZING_GROW(0);
             CLAY (CLAY_ID("AppearancePanel"), appearance) {
-                text("Appearance", 20, {236, 243, 250, 255});
+                auto appearance_heading = column(0, 0);
+                appearance_heading.layout.sizing.height = CLAY_SIZING_FIXED(40);
+                appearance_heading.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
+                CLAY_AUTO_ID (appearance_heading) {
+                    text("Appearance", 21, {236, 243, 250, 255});
+                }
                 ClayWidgets_ScrollPanelOptions scroll{};
                 scroll.width = CLAY_SIZING_GROW(0);
                 scroll.height = CLAY_SIZING_GROW(0);
@@ -163,19 +210,10 @@ void View::settings_panel(const Usage& data, Frame& result, ClayWidgets_Input in
                 scroll.fadeMargin = 8;
                 ClayWidgets_BeginScrollPanel(widgets_.get(), CLAY_ID("AppearanceScroll"), scroll);
                 auto& a = preferences_.appearance;
+                text("Taskbar", 19, {236, 243, 250, 255});
                 result.changed = setting_slider("TextSizeSlider", "Text size", a.text_percent,
                                                 preference_limits::text_percent, "%") ||
                                  result.changed;
-                static const char* fonts[] = {"Roboto", "Segoe UI", "Consolas"};
-                result.changed = choice_dropdown("FontChoice", "Font", fonts, 3, a.font) || result.changed;
-                static const char* accents[] = {"Accent: Teal", "Accent: Blue", "Accent: Purple"};
-                if (ClayWidgets_Button(widgets_.get(), CLAY_ID("AccentChoice"), string(accents[a.accent]))) {
-                    a.accent = (a.accent + 1) % 3;
-                    result.changed = true;
-                }
-                static const char* themes[] = {"Midnight", "Slate"};
-                result.changed =
-                    choice_dropdown("ThemeChoice", "Theme", themes, 2, a.theme) || result.changed;
                 result.changed = setting_slider("WidgetWidth", "Widget width", a.widget_width,
                                                 preference_limits::widget_width, " px") ||
                                  result.changed;
@@ -192,11 +230,12 @@ void View::settings_panel(const Usage& data, Frame& result, ClayWidgets_Input in
                     ClayWidgets_Checkbox(widgets_.get(), CLAY_ID("ShowResets"),
                                          CLAY_STRING("Show taskbar reset labels"), &a.show_resets) ||
                     result.changed;
+                text("Hover card", 19, {236, 243, 250, 255});
                 result.changed = ClayWidgets_Checkbox(widgets_.get(), CLAY_ID("HoverEnabled"),
                                                       CLAY_STRING("Show hover card"), &a.hover_enabled) ||
                                  result.changed;
-                result.changed = setting_slider("HoverWidth", "Hover width", a.hover_width,
-                                                preference_limits::hover_width, " px") ||
+                result.changed = setting_slider("HoverTextSizeSlider", "Text size", a.hover_text_percent,
+                                                preference_limits::text_percent, "%") ||
                                  result.changed;
                 result.changed = setting_slider("HoverOpacity", "Hover opacity", a.hover_opacity,
                                                 preference_limits::hover_opacity, "%") ||
@@ -204,15 +243,28 @@ void View::settings_panel(const Usage& data, Frame& result, ClayWidgets_Input in
                 result.changed = setting_slider("HoverDelay", "Hover delay", a.hover_delay,
                                                 preference_limits::hover_delay, " ms") ||
                                  result.changed;
-                wrapped_text("Font and text size apply to the taskbar and hover card. Scroll for more "
-                             "appearance controls.",
+                wrapped_text("The hover card stays open beside the taskbar while settings are open so "
+                             "changes preview live. Colors and font follow Windows settings.",
                              settings_help, {166, 187, 208, 255});
                 ClayWidgets_EndScrollPanel(widgets_.get(), CLAY_ID("AppearanceScroll"));
+                if (ClayWidgets_Button(widgets_.get(), CLAY_ID("ResetAppearance"), CLAY_STRING("Reset appearance"))) {
+                    preferences_.appearance = Appearance{};
+                    result.changed = true;
+                }
+
             }
             auto providers = column(0, 10);
             providers.layout.sizing.height = CLAY_SIZING_GROW(0);
             CLAY (CLAY_ID("ProvidersPanel"), providers) {
-                text("Providers", 20, {236, 243, 250, 255});
+                auto usage_heading = column(0, 8);
+                usage_heading.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+                usage_heading.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
+                CLAY_AUTO_ID (usage_heading) {
+                    text("Usage Remaining", 21, {236, 243, 250, 255});
+                    auto spacer = column(0, 0);
+                    CLAY_AUTO_ID (spacer) {}
+                    result.refresh = ClayWidgets_Button(widgets_.get(), CLAY_ID("RefreshUsage"), CLAY_STRING("Refresh"));
+                }
                 ClayWidgets_ScrollPanelOptions scroll{};
                 scroll.width = CLAY_SIZING_GROW(0);
                 scroll.height = CLAY_SIZING_GROW(0);
@@ -228,51 +280,31 @@ void View::settings_panel(const Usage& data, Frame& result, ClayWidgets_Input in
                         const auto& account = is_codex ? data.codex : data.claude;
                         auto card = column(12, 10);
                         card.backgroundColor = background_color();
-                        card.cornerRadius = CLAY_CORNER_RADIUS(6);
+                        card.cornerRadius = CLAY_CORNER_RADIUS(10);
                         CLAY (id(is_codex ? "LiveUsageCodex" : "LiveUsageClaude"), card) {
-                            text(is_codex ? "Codex usage" : "Claude usage", 18, {236, 243, 250, 255});
-                            auto& enabled =
-                                is_codex ? preferences_.codex_enabled : preferences_.claude_enabled;
-                            result.changed =
-                                ClayWidgets_Checkbox(
-                                    widgets_.get(), id(is_codex ? "EnableCodex" : "EnableClaude"),
-                                    string(is_codex ? "Enable Codex" : "Enable Claude"), &enabled) ||
-                                result.changed;
-                            text(account.installed
-                                     ? (enabled ? (account.error.empty() ? "Detected / tracking"
-                                                                         : "Detected / refresh failed")
-                                                : "Detected / disabled")
-                                     : "Not detected",
-                                 settings_body,
-                                 account.installed ? accent_color() : Clay_Color{240, 180, 90, 255});
+                            auto& enabled = is_codex ? preferences_.codex_enabled : preferences_.claude_enabled;
+                            auto header = column(0, 6);
+                            header.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+                            header.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
+                            CLAY_AUTO_ID (header) {
+                                text(is_codex ? "Codex usage" : "Claude usage", 19,
+                                     provider_color(is_codex ? "Codex" : "Claude"));
+                                auto spacer = column(0, 0);
+                                CLAY_AUTO_ID (spacer) {}
+                                result.changed = ClayWidgets_Toggle(widgets_.get(),
+                                    id(is_codex ? "EnableCodex" : "EnableClaude"), CLAY_STRING(""), &enabled) || result.changed;
+                            }
+                            text(label(freshness(account.updated, now)), settings_help, {157, 174, 193, 255});
+                            wrapped_text("Plan: " + (account.plan.empty() ? std::string("Not reported") : account.plan),
+                                         settings_body, {157, 174, 193, 255});
+                            text(!account.installed ? "Not detected" : !enabled ? "Disabled" :
+                                 !account.error.empty() ? "Refresh failed" : "Connected",
+                                 settings_help, {157, 174, 193, 255});
                             auto& interval =
                                 is_codex ? preferences_.codex_interval : preferences_.claude_interval;
                             result.changed =
                                 interval_dropdown(is_codex ? "CodexInterval" : "ClaudeInterval", interval) ||
                                 result.changed;
-                            wrapped_text(account.updated
-                                             ? "Last update: " + date(account.updated) + " (local)"
-                                             : "Last update: Never",
-                                         settings_body, {166, 187, 208, 255});
-                            wrapped_text("Plan: " + (account.plan.empty() ? std::string("Not reported")
-                                                                          : account.plan),
-                                         settings_body, {210, 220, 234, 255});
-                            text("Executable", settings_body, {166, 187, 208, 255});
-                            if (account.executable_path.empty())
-                                text("Not found", settings_body, {166, 187, 208, 255});
-                            else {
-                                // Preserve every character while wrapping long executable paths.
-                                for (std::size_t offset = 0; offset < account.executable_path.size();) {
-                                    auto end = std::min(offset + 28, account.executable_path.size());
-                                    while (end < account.executable_path.size() &&
-                                           (static_cast<unsigned char>(account.executable_path[end]) &
-                                            0xc0) == 0x80)
-                                        ++end;
-                                    text(label(account.executable_path.substr(offset, end - offset)),
-                                         settings_body, {166, 187, 208, 255});
-                                    offset = end;
-                                }
-                            }
                             if (!account.error.empty())
                                 wrapped_text("Last error: " + account.error, settings_body,
                                              {240, 180, 90, 255});
@@ -286,16 +318,39 @@ void View::settings_panel(const Usage& data, Frame& result, ClayWidgets_Input in
                                              settings_body, {166, 187, 208, 255});
                             for (std::size_t i = 0; i < account.windows.size(); ++i) {
                                 const auto& window = account.windows[i];
-                                wrapped_text(window.label, settings_body, {236, 243, 250, 255});
-                                compact_bar(label(std::string(is_codex ? "SettingsCodex" : "SettingsClaude") +
-                                                  std::to_string(i)),
-                                            "", window.remaining,
-                                            label(std::to_string(window.remaining) + "%"));
-                                wrapped_text(std::to_string(window.remaining) + "% remaining / " +
-                                                 std::to_string(100 - window.remaining) + "% used",
+                                allowance_row(label(std::string(is_codex ? "SettingsCodex" : "SettingsClaude") +
+                                                    std::to_string(i)),
+                                              is_codex ? "Codex" : "Claude", window, now);
+                            }
+                            auto divider = column(0, 0);
+                            divider.layout.sizing.height = CLAY_SIZING_FIXED(1);
+                            divider.backgroundColor = widgets_->theme.borderColor;
+                            CLAY_AUTO_ID (divider) {
+                            }
+                            const auto connection_id = id(is_codex ? "CodexConnection" : "ClaudeConnection");
+                            if (ClayWidgets_BeginCollapsible(widgets_.get(), connection_id,
+                                                             CLAY_STRING("Connection details"), &connection_open_[index])) {
+                                wrapped_text(account.updated
+                                                 ? "Last update: " + date(account.updated) + " (local)"
+                                                 : "Last update: Never",
                                              settings_body, {166, 187, 208, 255});
-                                wrapped_text("Resets: " + date(window.resets_at) + " (local)", settings_body,
-                                             {166, 187, 208, 255});
+                                text("Executable", settings_body, {166, 187, 208, 255});
+                                if (account.executable_path.empty())
+                                    text("Not found", settings_body, {166, 187, 208, 255});
+                                else {
+                                    // Preserve every character while wrapping long executable paths.
+                                    for (std::size_t offset = 0; offset < account.executable_path.size();) {
+                                        auto end = std::min(offset + 23, account.executable_path.size());
+                                        while (end < account.executable_path.size() &&
+                                               (static_cast<unsigned char>(account.executable_path[end]) &
+                                                0xc0) == 0x80)
+                                            ++end;
+                                        text(label(account.executable_path.substr(offset, end - offset)),
+                                             settings_body, {166, 187, 208, 255});
+                                        offset = end;
+                                    }
+                                }
+                                ClayWidgets_EndCollapsible(widgets_.get(), connection_id);
                             }
                         }
                     }
@@ -307,13 +362,6 @@ void View::settings_panel(const Usage& data, Frame& result, ClayWidgets_Input in
         actions.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
         actions.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
         CLAY (CLAY_ID("SettingsActions"), actions) {
-            if (ClayWidgets_Button(widgets_.get(), CLAY_ID("ResetAppearance"),
-                                   CLAY_STRING("Reset appearance to defaults"))) {
-                preferences_.appearance = Appearance{};
-                result.changed = true;
-            }
-            result.refresh = ClayWidgets_Button(widgets_.get(), CLAY_ID("RefreshUsage"),
-                                                CLAY_STRING("Refresh usage and detection"));
             Clay_ElementDeclaration spacer{};
             spacer.layout.sizing.width = CLAY_SIZING_GROW(0);
             CLAY_AUTO_ID (spacer) {
@@ -331,16 +379,18 @@ void View::settings_panel(const Usage& data, Frame& result, ClayWidgets_Input in
 void View::set_text_percent(int value) {
     preferences_.appearance.text_percent = preference_limits::text_percent.clamp(value);
 }
+void View::set_hover_text_percent(int value) {
+    preferences_.appearance.hover_text_percent = preference_limits::text_percent.clamp(value);
+}
 void View::text(const char* value, uint16_t size, Clay_Color tint, int text_percent) {
     if (text_percent == 0)
-        text_percent = preferences_.appearance.text_percent;
+        text_percent = surface_text_percent();
     Clay_TextElementConfig config{};
     config.fontSize = static_cast<uint16_t>(std::lround(
         size * (surface_ == Surface::Widget || surface_ == Surface::Hover ? text_percent / 100.f : 1.f)));
-    if (surface_ == Surface::Widget || surface_ == Surface::Hover)
-        config.fontId = static_cast<uint16_t>(preferences_.appearance.font);
-    config.textColor = surface_ == Surface::Widget && system_light_ ? Clay_Color{35, 40, 48, 255} : tint;
-    config.wrapMode = CLAY_TEXT_WRAP_NONE;
+    config.fontId = 1;
+    config.textColor = text_color(tint);
+    config.wrapMode = surface_ == Surface::Hover ? CLAY_TEXT_WRAP_WORDS : CLAY_TEXT_WRAP_NONE;
     CLAY_TEXT(string(value), config);
 }
 View::View(Surface surface, ClayWidgets_MeasureTextFunction measure, void* measure_data)
@@ -386,14 +436,18 @@ Clay_BoundingBox View::bounds(const char* name) {
     Clay_SetCurrentContext(clay_);
     return Clay_GetElementData(id(name)).boundingBox;
 }
+uint16_t View::widget_gap(int normal, int minimum) const {
+    return static_cast<uint16_t>(surface_ == Surface::Widget
+        ? std::lround(minimum + (normal - minimum) * widget_spacing_ / 100.f) : normal);
+}
 void View::compact_bar(const char* name, const char* label, int value, std::string_view percent, bool aligned,
                        float percent_width, int text_percent) {
     if (text_percent == 0)
-        text_percent = preferences_.appearance.text_percent;
+        text_percent = surface_text_percent();
     const uint16_t text_size = surface_ == Surface::Settings ? settings_body : 10;
     auto row = column(0, 0);
     row.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
-    row.layout.childGap = aligned ? 3 : 5;
+    row.layout.childGap = widget_gap(aligned ? 3 : 5, 1);
     row.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
     CLAY (id(name), row) {
         if (surface_ == Surface::Hover || aligned) {
@@ -402,7 +456,7 @@ void View::compact_bar(const char* name, const char* label, int value, std::stri
             if (aligned) {
                 const char* longest = std::strchr(label, '*') ? "General *" : "General";
                 Clay_TextElementConfig config{};
-                config.fontId = static_cast<uint16_t>(preferences_.appearance.font);
+                config.fontId = 1;
                 config.fontSize = static_cast<uint16_t>(std::lround(text_size * text_percent / 100.f));
                 const Clay_StringSlice sample{static_cast<int32_t>(std::strlen(longest)), longest, longest};
                 label_width =
@@ -449,7 +503,7 @@ void View::claude_only(const AccountUsage& account, const Allowance& weekly, con
     const auto general_percent = std::to_string(weekly.remaining) + "%";
     const auto fable_percent = std::to_string(fable.remaining) + "%";
     Clay_TextElementConfig config{};
-    config.fontId = static_cast<uint16_t>(preferences_.appearance.font);
+    config.fontId = 1;
     config.fontSize = static_cast<uint16_t>(std::lround(10 * preferences_.appearance.text_percent / 100.f));
     const auto measure_percent = [&](const std::string& value) {
         const Clay_StringSlice sample{static_cast<int32_t>(value.size()), value.c_str(), value.c_str()};
@@ -457,14 +511,14 @@ void View::claude_only(const AccountUsage& account, const Allowance& weekly, con
     };
     const float percent_width =
         std::ceil(std::max(measure_percent(general_percent), measure_percent(fable_percent)));
-    auto row = column(0, 6);
+    auto row = column(0, widget_gap(6, 1));
     row.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
     row.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
     CLAY (CLAY_ID("ClaudeOnly"), row) {
-        auto bars = column(0, 2);
-        if (preferences_.appearance.text_percent > 160) {
+        auto bars = column(0, widget_gap(2));
+        if (preferences_.appearance.text_percent > stacked_text_limit()) {
             bars.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
-            bars.layout.childGap = 12;
+            bars.layout.childGap = widget_gap(12, 2);
         }
         CLAY (CLAY_ID("ClaudeOnlyBars"), bars) {
             compact_bar("ClaudeGeneral", account.error.empty() ? "General" : "General *", weekly.remaining,
@@ -516,7 +570,7 @@ void View::taskbar_allowance(const char* name, const char* title, const Allowanc
 }
 void View::claude_bars(const AccountUsage& account, const Allowance& weekly, const Allowance& fable) {
     const bool narrow = preferences_.appearance.widget_width < 208;
-    auto row = column(0, narrow ? 3 : 5);
+    auto row = column(0, widget_gap(narrow ? 3 : 5, 1));
     row.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
     row.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
     CLAY (CLAY_ID("Claude"), row) {
@@ -560,9 +614,9 @@ const char* View::label(std::string value) {
     labels_.push_back(std::move(value));
     return labels_.back().c_str();
 }
-Clay_Dimensions widget_size(const Usage& data, const Appearance& appearance) {
+Clay_Dimensions widget_size(const Usage& data, const Appearance& appearance, int spacing_percent) {
     int rows = 1;
-    if (data.live && appearance.text_percent > 160) {
+    if (data.live && appearance.text_percent > 160 + (100 - spacing_percent) / 5) {
         if (data.codex_active() && data.claude_active())
             rows = 2;
         else if (data.claude_active()) {
@@ -575,8 +629,26 @@ Clay_Dimensions widget_size(const Usage& data, const Appearance& appearance) {
                 rows = 2;
         }
     }
-    return {appearance.widget_width * appearance.text_percent / 100.f * rows,
+    const float savings = (8.f + 10.f * (rows - 1) + 4.f * rows) * (100 - spacing_percent) / 100.f;
+    return {appearance.widget_width * appearance.text_percent / 100.f * rows - savings,
             static_cast<float>(widget_height)};
+}
+WidgetPlacement place_widget(const Usage& data, const Appearance& appearance, Rect panel,
+                             const std::vector<Rect>& occupied, float scale) {
+    if (scale <= 0) return {};
+    auto fitted = appearance;
+    for (int percent = appearance.text_percent; percent >= preference_limits::text_percent.min; --percent) {
+        fitted.text_percent = percent;
+        // Preserve font size first: tighten spacing before trying smaller text.
+        for (int spacing = 100; spacing >= 0; spacing -= 10) {
+            const auto size = widget_size(data, fitted, spacing);
+            const auto bounds = find_space(panel, occupied, static_cast<int>(std::lround(size.width * scale)),
+                                           static_cast<int>(std::lround(size.height * scale)),
+                                           static_cast<int>(std::ceil(8 * scale)), appearance.position);
+            if (!bounds.empty()) return {bounds, percent, spacing};
+        }
+    }
+    return {};
 }
 Clay_Dimensions hover_size(const Usage& data, int text_percent) {
     const float scale = text_percent / 100.f;
@@ -584,69 +656,103 @@ Clay_Dimensions hover_size(const Usage& data, int text_percent) {
         return {320.f * scale, 250.f * scale};
     const auto font = [scale](int size) { return static_cast<float>(std::lround(size * scale)); };
     // Padding and layout gaps stay fixed; only text grows with the preference.
-    float height = 28 + font(16) + font(10) + 10;
+    float height = 28 + font(11);
     int providers = 0;
     for (const auto* account : {&data.codex, &data.claude}) {
         if (!(account == &data.codex ? data.codex_active() : data.claude_active()))
             continue;
-        ++providers;
-        height += 10 + font(12);
-        height += account->windows.empty() ? 6 + font(11)
-                                           : (2 * font(10) + 9) * static_cast<float>(account->windows.size());
+        if (providers++)
+            height += 11; // Divider and its additional root gap.
+        height += 14 + font(14) + font(11);
+        height += account->windows.empty() ? 6 + font(13)
+            : (font(14) + font(12) + 19) * static_cast<float>(account->windows.size());
     }
     if (!providers)
-        height += 10 + font(12);
+        height += 14 + font(14) + font(11);
     return {360.f * scale, height + 4};
+}
+void View::allowance_row(const char* name, const char* provider, const Allowance& window,
+                         std::int64_t now) {
+    const bool settings = surface_ == Surface::Settings;
+    auto allowance = column(0, settings ? 5 : 3);
+    CLAY_AUTO_ID (allowance) {
+        auto line = column(0, 4);
+        line.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+        line.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
+        CLAY_AUTO_ID (line) {
+            text(window.label.c_str(), settings ? settings_body : 12, {172, 190, 210, 255});
+            auto space = column(0, 0);
+            CLAY_AUTO_ID (space) {
+            }
+            text(label(std::to_string(window.remaining) + "%"), settings ? 21 : 14, {236, 243, 250, 255});
+        }
+        auto track = column(0, 0);
+        track.layout.sizing.height = CLAY_SIZING_FIXED(7);
+        track.backgroundColor = widgets_->theme.borderColor;
+        track.cornerRadius = CLAY_CORNER_RADIUS(3);
+        CLAY (id(name), track) {
+            auto fill = column(0, 0);
+            fill.layout.sizing.width = CLAY_SIZING_PERCENT(std::clamp(window.remaining, 0, 100) / 100.f);
+            fill.layout.sizing.height = CLAY_SIZING_GROW(0);
+            fill.backgroundColor = provider_color(provider, window.label.find("Fable") != std::string::npos);
+            fill.cornerRadius = CLAY_CORNER_RADIUS(3);
+            CLAY_AUTO_ID (fill) {
+            }
+        }
+        text(label(hover_reset(window.resets_at, now)), settings ? settings_help : 12, {157, 174, 193, 255});
+    }
+}
+float View::hover_height(Usage& data, float width) {
+    frame(data, {}, width, 10000);
+    return std::ceil(bounds("HoverOverview").height);
 }
 void View::hover_usage(const Usage& data) {
     auto root = column(14, 10);
-    root.layout.sizing.height = CLAY_SIZING_GROW(0);
+    root.layout.sizing.height = CLAY_SIZING_FIT(0);
     root.backgroundColor = background_color();
     CLAY (CLAY_ID("HoverOverview"), root) {
-        auto heading = column(0, 6);
-        heading.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
-        heading.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
-        CLAY_AUTO_ID (heading) {
-            text("Usage", 16, {236, 243, 250, 255});
-            Clay_ElementDeclaration space{};
-            space.layout.sizing.width = CLAY_SIZING_GROW(0);
-            CLAY_AUTO_ID (space) {
-            }
-            text("Remaining / resets locally", 10, {157, 174, 193, 255});
-        }
+        const auto now = reference_time_ ? reference_time_ : static_cast<std::int64_t>(std::time(nullptr));
+        bool first_provider = true;
         for (const auto& entry :
              {std::pair<const char*, const AccountUsage*>{"Codex", &data.codex}, {"Claude", &data.claude}}) {
             const auto& account = *entry.second;
             if (!(entry.second == &data.codex ? data.codex_active() : data.claude_active()))
                 continue;
+            if (!first_provider) {
+                auto divider = column(0, 0);
+                divider.layout.sizing.height = CLAY_SIZING_FIXED(1);
+                divider.backgroundColor = widgets_->theme.borderColor;
+                CLAY_AUTO_ID (divider) {
+                }
+            }
+            first_provider = false;
             auto provider = column(0, 6);
             CLAY (id(label(std::string("Hover") + entry.first)), provider) {
-                text(label(std::string(entry.first) + (account.error.empty()     ? ""
-                                                       : account.windows.empty() ? " - unavailable"
-                                                                                 : " - stale")),
-                     12, account.error.empty() ? provider_color(entry.first) : Clay_Color{240, 180, 90, 255});
+                auto header = column(0, 4);
+                header.layout.layoutDirection = CLAY_TOP_TO_BOTTOM;
+                header.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
+                CLAY_AUTO_ID (header) {
+                    text(label(std::string(entry.first) +
+                               (account.error.empty() ? "" : account.windows.empty() ? " - unavailable" : " - stale")),
+                         14, account.error.empty() ? provider_color(entry.first) : Clay_Color{240, 180, 90, 255});
+                    if (!account.windows.empty())
+                        text(label(freshness(account.updated, now)), 11, {157, 174, 193, 255});
+                }
                 if (account.windows.empty())
-                    text(account.error.empty() ? "Connecting..." : "Refresh failed. Click for details.", 11,
+                    text(account.error.empty() ? "Connecting..." : "Refresh failed - click widget", 13,
                          {157, 174, 193, 255});
                 for (std::size_t i = 0; i < account.windows.size(); ++i) {
                     const auto& window = account.windows[i];
-                    auto allowance = column(0, 3);
-                    CLAY_AUTO_ID (allowance) {
-                        compact_bar(label(std::string("Hover") + entry.first + std::to_string(i)),
-                                    window.label.c_str(), window.remaining,
-                                    label(std::to_string(window.remaining) + "%"));
-                        text(label(window.resets_at > 0 ? "Resets " + date(window.resets_at)
-                                                        : "Reset unavailable"),
-                             10, {157, 174, 193, 255});
-                    }
+                    allowance_row(label(std::string("Hover") + entry.first + std::to_string(i)),
+                                  entry.first, window, now);
                 }
             }
         }
         if (!data.codex_active() && !data.claude_active())
             text(!data.codex_enabled && !data.claude_enabled ? "Providers disabled - open settings"
                                                              : "No supported installations detected",
-                 12, {157, 174, 193, 255});
-        text("Click for settings and usage", 10, {157, 174, 193, 255});
+                 14, {157, 174, 193, 255});
+        text("Click widget for details - times local", 11, {157, 174, 193, 255});
     }
 }
 void View::live_usage(const char* provider, const AccountUsage& account, Frame& result,
@@ -722,26 +828,32 @@ void View::live_usage(const char* provider, const AccountUsage& account, Frame& 
     }
 }
 void View::apply_theme() {
-    const bool midnight = preferences_.appearance.theme == 0;
-    widgets_->theme.accentColor = accent_color();
-    widgets_->theme.focusRingColor = accent_color();
     const auto selected_accent = accent_color();
+    widgets_->theme.accentColor = selected_accent;
+    widgets_->theme.focusRingColor = selected_accent;
     widgets_->theme.accentMutedColor = {selected_accent.r * 0.35f, selected_accent.g * 0.35f,
                                         selected_accent.b * 0.35f, 255};
-    widgets_->theme.surfaceColor = midnight ? Clay_Color{24, 31, 42, 255} : Clay_Color{44, 51, 63, 255};
-    widgets_->theme.surfaceAltColor = midnight ? Clay_Color{32, 41, 55, 255} : Clay_Color{55, 65, 80, 255};
-    widgets_->theme.borderColor = midnight ? Clay_Color{48, 60, 77, 255} : Clay_Color{76, 88, 105, 255};
-    if (surface_ == Surface::Widget && system_light_)
-        widgets_->theme.borderColor = {180, 187, 196, 255};
-    widgets_->theme.hoverColor = midnight ? Clay_Color{43, 54, 71, 255} : Clay_Color{66, 77, 94, 255};
+    widgets_->theme.textColor = text_color({236, 243, 250, 255});
+    widgets_->theme.textMutedColor = text_color({157, 174, 193, 255});
+    widgets_->theme.surfaceColor = light_theme() ? Clay_Color{250, 250, 250, 255} : Clay_Color{39, 39, 39, 255};
+    widgets_->theme.surfaceAltColor = widgets_->theme.surfaceColor;
+    widgets_->theme.borderColor = light_theme() ? Clay_Color{205, 205, 205, 255} : Clay_Color{65, 65, 65, 255};
+    widgets_->theme.hoverColor = light_theme() ? Clay_Color{230, 230, 230, 255} : Clay_Color{52, 52, 52, 255};
+    widgets_->theme.fontBody = widgets_->theme.fontHeading = 1;
+    widgets_->theme.selectionColor = widgets_->theme.hoverColor;
+    widgets_->theme.onSelectionColor = widgets_->theme.textColor;
+    widgets_->theme.pressedColor = widgets_->theme.borderColor;
+    widgets_->theme.onAccentColor = (selected_accent.r * 0.299f + selected_accent.g * 0.587f +
+                                     selected_accent.b * 0.114f) > 150.f
+                                        ? Clay_Color{20, 20, 20, 255} : Clay_Color{255, 255, 255, 255};
     widgets_->theme.fontSizeBody = surface_ == Surface::Settings ? settings_body : 18;
 }
 
 void View::live_panel(const Usage& data, Frame& result, ClayWidgets_Input input) {
     if (surface_ == Surface::Widget && (data.codex_active() || data.claude_active())) {
-        const bool horizontal = preferences_.appearance.text_percent > 160;
-        auto root = column(6, horizontal ? 12 : 2);
-        root.layout.padding.top = root.layout.padding.bottom = 2;
+        const bool horizontal = preferences_.appearance.text_percent > stacked_text_limit();
+        auto root = column(widget_gap(6, 2), widget_gap(horizontal ? 12 : 2, horizontal ? 2 : 0));
+        root.layout.padding.top = root.layout.padding.bottom = widget_gap(2);
         root.layout.sizing.height = CLAY_SIZING_GROW(0);
         root.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
         if (horizontal)
@@ -869,33 +981,29 @@ void View::demo_hover(const Usage& data) {
 }
 
 void View::demo_settings(Frame& result, ClayWidgets_Input input) {
-    text_size_label_ = std::to_string(preferences_.appearance.text_percent) + "%";
     auto panel = column(0, 0);
     panel.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
     panel.layout.sizing.height = CLAY_SIZING_GROW(0);
     panel.backgroundColor = background_color();
     CLAY (CLAY_ID("SettingsPanel"), panel) {
-        auto root = column(24, 18);
+        auto root = column(24, 14);
         root.layout.sizing.height = CLAY_SIZING_GROW(0);
         CLAY (CLAY_ID("Settings"), root) {
             text("UsageTracker", 26, {236, 243, 250, 255});
             text("Appearance", 17, {236, 243, 250, 255});
-            text("Widget and hover text size", 14, {157, 174, 193, 255});
-            text(text_size_label_.c_str(), 20, accent_color());
-            float value = static_cast<float>(preferences_.appearance.text_percent);
-            ClayWidgets_SliderOptions options{};
-            options.minValue = static_cast<float>(preference_limits::text_percent.min);
-            options.maxValue = static_cast<float>(preference_limits::text_percent.max);
-            options.step = static_cast<float>(preference_limits::text_percent.step);
-            if (ClayWidgets_Slider(widgets_.get(), CLAY_ID("TextSizeSlider"), &value, options)) {
-                set_text_percent(static_cast<int>(std::lround(value)));
-                result.changed = true;
-            }
+            auto& a = preferences_.appearance;
+            result.changed = setting_slider("TextSizeSlider", "Taskbar text size", a.text_percent,
+                                            preference_limits::text_percent, "%") ||
+                             result.changed;
+            result.changed = setting_slider("HoverTextSizeSlider", "Hover text size", a.hover_text_percent,
+                                            preference_limits::text_percent, "%") ||
+                             result.changed;
             text("150% default  /  100-300% range", 12, {157, 174, 193, 255});
-            text("Larger text uses more taskbar space.", 11, {157, 174, 193, 255});
+            text("Larger taskbar text uses more taskbar space.", 11, {157, 174, 193, 255});
             if (ClayWidgets_Button(widgets_.get(), CLAY_ID("ResetTextSize"),
                                    CLAY_STRING("Reset to default"))) {
                 set_text_percent(150);
+                set_hover_text_percent(150);
                 result.changed = true;
             }
             Clay_ElementDeclaration space{};

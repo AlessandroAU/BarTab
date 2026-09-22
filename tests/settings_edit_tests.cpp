@@ -13,7 +13,7 @@ int main() {
         usage::SettingsEdit edit;
         usage::Preferences saved;
         saved.codex_interval = 45;
-        saved.appearance.font = 2;
+        saved.appearance.widget_width = 200;
         check(!edit.cancel(), "Closing without an edit must do nothing");
         edit.begin(saved);
         auto draft = saved;

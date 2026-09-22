@@ -85,19 +85,18 @@ void placement_preference_tests() {
 }
 void preference_tests() {
     Preferences settings;
-    require(settings.appearance.text_percent == 150, "Default text size is 150 percent");
+    require(settings.appearance.text_percent == 150 && settings.appearance.hover_text_percent == 150,
+            "Default taskbar and hover text sizes are 150 percent");
     settings.appearance.text_percent = 400;
-    settings.appearance.font = 99;
+    settings.appearance.hover_text_percent = 10;
     settings.appearance.hover_opacity = -1;
     settings.appearance.widget_width = 1;
-    settings.appearance.hover_width = 1;
     settings.codex_interval = 1;
     settings.claude_interval = 10000;
     settings.normalize();
-    require(settings.appearance.text_percent == 300 && settings.appearance.font == 2,
+    require(settings.appearance.text_percent == 300 && settings.appearance.hover_text_percent == 100,
             "Appearance values are bounded");
-    require(settings.appearance.hover_opacity == 50 && settings.appearance.widget_width == 100 &&
-                settings.appearance.hover_width == 240,
+    require(settings.appearance.hover_opacity == 50 && settings.appearance.widget_width == 100,
             "Visibility and minimum width are protected");
     require(settings.codex_interval == 15 && settings.claude_interval == 900,
             "Polling intervals are bounded independently");

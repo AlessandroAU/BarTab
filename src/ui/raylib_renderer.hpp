@@ -18,7 +18,11 @@ class Renderer {
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
     Clay_Dimensions measure(Clay_StringSlice, Clay_TextElementConfig*);
-    void set_scale(float scale);
+    // Call before measuring or rendering a view: the DPI scale picks the atlas
+    // pixel size and the view's text gamma (View::text_gamma) picks its curve.
+    // One call for both so a surface cannot render with the other's atlas.
+    void set_surface(float scale, float text_gamma);
+    bool load_font_data(uint16_t id, std::vector<unsigned char> bytes);
     bool load_font(uint16_t id, const std::filesystem::path& path);
     Pixels render(Clay_RenderCommandArray, int width, int height, float scale, bool hit_background);
     // Composites the premultiplied result over an opaque 0xRRGGBB backdrop and

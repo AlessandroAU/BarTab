@@ -140,8 +140,9 @@ if(WIN32)
 
     # Regenerates the README images offscreen. Not part of the test suite: it
     # needs a GPU context and writes into the source tree.
-    add_executable(screenshots src/tools/screenshots.cpp)
-    target_link_libraries(screenshots PRIVATE usage_renderer)
+    add_executable(screenshots src/tools/screenshots.cpp src/windows/platform.cpp)
+    target_link_libraries(screenshots PRIVATE usage_renderer user32 gdi32 dwmapi advapi32)
+    target_compile_definitions(screenshots PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
     add_custom_target(docs-screenshots
         COMMAND screenshots "${CMAKE_CURRENT_SOURCE_DIR}/docs/images"
         DEPENDS screenshots

@@ -36,8 +36,51 @@ int main() {
         usage::ui::View details(usage::ui::Surface::Details, measure, nullptr);
         usage::ui::View widget(usage::ui::Surface::Widget, measure, nullptr);
         usage::ui::View hover(usage::ui::Surface::Hover, measure, nullptr);
+        {
+            usage::Usage pair;
+            pair.live = true;
+            pair.codex.installed = pair.claude.installed = true;
+            usage::Appearance appearance;
+            const usage::Rect panel{0, 0, 1000, 48};
+            const std::vector<usage::Rect> occupied{{0, 0, 650, 48}, {950, 0, 50, 48}};
+            for (const int percent : {150, 160, 170, 200, 300}) {
+                appearance.text_percent = percent;
+                const auto placed = usage::ui::place_widget(pair, appearance, panel, occupied, 1.f);
+                check(!placed.bounds.empty(), "Increasing taskbar text never hides a widget that still fits");
+                check(placed.text_percent <= percent && placed.text_percent >= 100,
+                      "Taskbar text uses the largest supported fitting scale");
+                for (const auto& block : occupied)
+                    check(!placed.bounds.intersects(block), "Fitted taskbar widget avoids buttons");
+            }
+            appearance.text_percent = 180;
+            pair.codex.windows = {{"Weekly", 81, 1790583271}};
+            pair.claude.windows = {{"Weekly", 44, 1790583271}, {"Fable weekly", 23, 1790583271}};
+            const auto tight = usage::ui::place_widget(pair, appearance, panel, occupied, 1.f);
+            check(tight.text_percent == 180 && tight.spacing_percent < 100,
+                  "Tighter spacing preserves large stacked text before reducing the font");
+            usage::Preferences fitted;
+            fitted.appearance = appearance;
+            widget.set_preferences(fitted);
+            widget.set_widget_spacing(tight.spacing_percent);
+            auto compact = widget.frame(pair, neutral(), static_cast<float>(tight.bounds.width), 38);
+            for (int i = 0; i < compact.commands.length; ++i) {
+                const auto& command = compact.commands.internalArray[i];
+                if (command.commandType == CLAY_RENDER_COMMAND_TYPE_TEXT)
+                    check(command.boundingBox.x >= 0 && command.boundingBox.y >= 0 &&
+                              command.boundingBox.x + command.boundingBox.width <= tight.bounds.width &&
+                              command.boundingBox.y + command.boundingBox.height <= 38,
+                          "Adaptive spacing keeps the larger taskbar text inside the widget");
+            }
+            widget.set_widget_spacing(100);
+            appearance.text_percent = 300;
+            const auto spacious = usage::ui::place_widget(pair, appearance, panel, {}, 1.f);
+            check(spacious.text_percent == 300, "Taskbar restores requested text size when space returns");
+            check(usage::ui::place_widget(pair, appearance, panel, {panel}, 1.f).bounds.empty(),
+                  "Completely full taskbar still hides widget safely");
+        }
         usage::Preferences baseline;
         baseline.appearance.text_percent = 100;
+        baseline.appearance.hover_text_percent = 100;
         baseline.appearance.widget_width = 208;
         widget.set_preferences(baseline);
         hover.set_preferences(baseline);
@@ -112,17 +155,35 @@ int main() {
         resets.claude.windows[2].resets_at += 86400;
         actual = widget.frame(resets, neutral(), 208, 38);
         check(contains(actual.commands, "reset 25/09 / 26/09"), "Claude retains different reset dates");
+        for (const float width : {150.f, 225.f, 480.f}) {
+            const float height = hover.hover_height(live, width);
+            actual = hover.frame(live, neutral(), width, height);
+            for (int i = 0; i < actual.commands.length; ++i) {
+                const auto& command = actual.commands.internalArray[i];
+                if (command.commandType == CLAY_RENDER_COMMAND_TYPE_TEXT)
+                    check(command.boundingBox.x >= 0 && command.boundingBox.x + command.boundingBox.width <= width + 1 &&
+                              command.boundingBox.y + command.boundingBox.height <= height + 1,
+                          "Hover wraps within the matched widget width and measured height");
+            }
+        }
+        hover.set_reference_time(1790000000);
+        live.codex.updated = 1789999280;
+        live.codex.windows[0].resets_at = 1790008040;
         for (const int percent : {100, 140}) {
-            hover.set_text_percent(percent);
+            hover.set_hover_text_percent(percent);
             const auto size = usage::ui::hover_size(live, percent);
             actual = hover.frame(live, neutral(), size.width, size.height);
             check(contains(actual.commands, "Codex - stale") && contains(actual.commands, "Claude") &&
                       contains(actual.commands, "Fable weekly"),
                   "Combined hover preserves providers, stale state and model windows");
+            check(contains(actual.commands, "Resets in 2h 14m") &&
+                      contains(actual.commands, "Updated 12m ago") &&
+                      !contains(actual.commands, "Usage Remaining"),
+                  "Hover explains remaining allowance, relative resets and freshness");
             const auto codex = hover.bounds("HoverCodex"), claude = hover.bounds("HoverClaude");
             check(codex.x == claude.x && claude.y >= codex.y + codex.height,
                   "Providers stack in one compact panel");
-            check(size.width <= 504 && size.height < 340, "Combined hover stays compact at both text sizes");
+            check(size.width <= 504 && size.height < 540, "Combined hover stays compact at both text sizes");
             for (int i = 0; i < actual.commands.length; ++i) {
                 const auto& command = actual.commands.internalArray[i];
                 if (command.commandType == CLAY_RENDER_COMMAND_TYPE_TEXT) {
@@ -135,7 +196,7 @@ int main() {
                 }
             }
         }
-        hover.set_text_percent(100);
+        hover.set_hover_text_percent(100);
         // Saved provider choices control all surfaces, even with retained readings.
         auto selected = live;
         selected.claude.windows[1].resets_at = 1790583271;
@@ -186,8 +247,8 @@ int main() {
         for (const int percent : {100, 140}) {
             usage::Preferences narrow;
             narrow.appearance.widget_width = 160;
-            narrow.appearance.hover_width = 240;
             narrow.appearance.text_percent = percent;
+            narrow.appearance.hover_text_percent = percent;
             widget.set_preferences(narrow);
             hover.set_preferences(narrow);
             for (const bool codex : {false, true}) {
@@ -216,6 +277,7 @@ int main() {
         for (const int percent : {100, 150, 160, 170, 200, 300}) {
             usage::Preferences sized;
             sized.appearance.text_percent = percent;
+            sized.appearance.hover_text_percent = percent;
             widget.set_preferences(sized);
             hover.set_preferences(sized);
             for (const bool codex : {false, true}) {
@@ -245,6 +307,34 @@ int main() {
                     check(command.boundingBox.y + command.boundingBox.height <= size.height,
                           "Hover accommodates the entire text-size range");
             }
+        }
+        {
+            auto edge = live;
+            edge.codex.windows = {{"5 hour", 0, 1789999999}, {"Weekly", 100, 0}};
+            const auto size = usage::ui::hover_size(edge, hover.hover_text_percent());
+            actual = hover.frame(edge, neutral(), size.width, size.height);
+            check(contains(actual.commands, "Reset due - awaiting update") &&
+                      contains(actual.commands, "Reset unavailable"),
+                  "Hover distinguishes overdue and unknown resets");
+        }
+        {
+            // The hover card follows its own text size, not the taskbar's.
+            usage::Preferences split = baseline;
+            split.appearance.text_percent = 100;
+            split.appearance.hover_text_percent = 200;
+            hover.set_preferences(split);
+            const auto size = usage::ui::hover_size(live, 200);
+            actual = hover.frame(live, neutral(), size.width, size.height);
+            uint16_t largest = 0;
+            for (int i = 0; i < actual.commands.length; ++i) {
+                const auto& command = actual.commands.internalArray[i];
+                if (command.commandType == CLAY_RENDER_COMMAND_TYPE_TEXT)
+                    largest = std::max(largest, command.renderData.text.fontSize);
+            }
+            check(largest == 28, "Hover text scales with the hover text size");
+            const float tall = hover.hover_height(live, 360);
+            hover.set_preferences(baseline);
+            check(tall > hover.hover_height(live, 360), "Hover height follows the hover text size");
         }
         widget.set_preferences(baseline);
         hover.set_preferences(baseline);
@@ -283,7 +373,20 @@ int main() {
         settings_input = neutral();
         settings_input.keyEnd = true;
         settings.frame(data, settings_input, 400, 470);
-        check(settings.text_percent() == 300, "Settings keyboard selects largest text");
+        check(settings.text_percent() == 300 && settings.hover_text_percent() == 150,
+              "Settings keyboard selects largest taskbar text without touching the hover size");
+        settings_input = neutral();
+        settings_input.keyTab = true;
+        settings.frame(data, settings_input, 400, 470);
+        settings_input = neutral();
+        settings_input.keyHome = true;
+        settings.frame(data, settings_input, 400, 470);
+        check(settings.hover_text_percent() == 100 && settings.text_percent() == 300,
+              "Hover text size has its own slider");
+        settings_input = neutral();
+        settings_input.keyTab = true;
+        settings_input.shiftDown = true;
+        settings.frame(data, settings_input, 400, 470);
         settings_input = neutral();
         settings_input.keyEscape = true;
         check(settings.frame(data, settings_input, 400, 470).close, "Escape cancels settings");
@@ -295,6 +398,9 @@ int main() {
         check(contains(actual.commands, "Appearance") && contains(actual.commands, "Codex usage") &&
                   contains(actual.commands, "Claude usage"),
               "Unified settings shows appearance and both providers");
+        check(settings.bounds("TextSizeSlider").width > 0 && settings.bounds("HoverTextSizeSlider").width > 0 &&
+                  settings.bounds("HoverTextSizeSlider").y > settings.bounds("HoverEnabled").y,
+              "Unified settings has separate taskbar and hover text sliders");
         check(contains(actual.commands, "Last error: Connection failed"), "Provider error remains readable");
         for (int i = 0; i < actual.commands.length; ++i) {
             const auto& command = actual.commands.internalArray[i];
@@ -305,7 +411,7 @@ int main() {
             if (value == "Enable Codex" || value == "Roboto" || value == "Update interval" ||
                 value == "1 minute" || value == "Last error: Connection failed" ||
                 value == "Plan: Not reported")
-                check(command.renderData.text.fontSize == 16,
+                check(command.renderData.text.fontSize == 18,
                       "Settings labels, metadata and controls share one body size");
             check(command.renderData.text.fontSize >= 14, "Settings text never uses tiny taskbar type");
         }
@@ -375,22 +481,14 @@ int main() {
             pointer.pointerReleased = true;
             return settings.frame(live, pointer, 1120, 700);
         };
-        click_config("FontChoice");
-        auto choice_key = neutral();
-        choice_key.keyDown = true;
-        settings.frame(live, choice_key, 1120, 700);
-        choice_key = neutral();
-        choice_key.keyEnter = true;
-        settings.frame(live, choice_key, 1120, 700);
-        check(settings.preferences().appearance.font == 1, "Font choice is configurable");
-        click_config("ThemeChoice");
-        choice_key = neutral();
-        choice_key.keyEnd = true;
-        settings.frame(live, choice_key, 1120, 700);
-        choice_key = neutral();
-        choice_key.keyEnter = true;
-        settings.frame(live, choice_key, 1120, 700);
-        check(settings.preferences().appearance.theme == 1, "Theme dropdown updates the appearance");
+        check(!contains(settings.frame(live, neutral(), 1120, 700).commands, "Executable"),
+              "Connection details start collapsed");
+        auto connection_frame = click_config("CodexConnection");
+        check(contains(connection_frame.commands, "Executable"), "Connection details expand on click");
+        connection_frame = click_config("CodexConnection");
+        check(!contains(connection_frame.commands, "Executable"), "Connection details collapse on click");
+        check(settings.bounds("FontChoice").width == 0 && settings.bounds("ThemeChoice").width == 0 &&
+                  settings.bounds("AccentChoice").width == 0, "Windows appearance needs no manual selectors");
         const auto background = [&]() {
             auto frame = settings.frame(live, neutral(), 1120, 700);
             for (int i = 0; i < frame.commands.length; ++i) {
@@ -401,16 +499,11 @@ int main() {
             }
             return -1.f;
         };
-        check(background() == 35, "Slate paints the settings background");
-        click_config("ThemeChoice");
-        choice_key = neutral();
-        choice_key.keyHome = true;
-        settings.frame(live, choice_key, 1120, 700);
-        choice_key = neutral();
-        choice_key.keyEnter = true;
-        settings.frame(live, choice_key, 1120, 700);
-        check(settings.preferences().appearance.theme == 0 && background() == 19,
-              "Midnight can be selected again and repaints settings");
+        check(background() == 32, "Windows dark mode paints a neutral settings background");
+        settings.set_system_light(true);
+        check(background() == 243, "Windows light mode repaints settings");
+        settings.set_system_light(false);
+        check(background() == 32, "Windows dark mode restores the dark palette");
         click_config("CodexInterval");
         auto interval_key = neutral();
         interval_key.keyEnd = true;
@@ -427,11 +520,11 @@ int main() {
                   settings.preferences().claude_interval == 60,
               "Escape dismisses the dropdown without closing Settings");
         const auto footer = settings.bounds("SaveSettings");
-        for (const auto* name : {"ResetAppearance", "RefreshUsage", "CancelSettings"}) {
-            const auto button = settings.bounds(name);
-            check(button.y == footer.y && button.y + button.height <= 700,
-                  "All settings actions share one visible row");
-        }
+        const auto cancel = settings.bounds("CancelSettings");
+        check(cancel.y == footer.y && cancel.y + cancel.height <= 700,
+              "Save and Cancel share the footer");
+        check(settings.bounds("RefreshUsage").y < settings.bounds("ProvidersScroll").y,
+              "Refresh sits above usage readings");
 
         auto scroll_input = neutral();
         scroll_input.mouseX = appearance_panel.x + 30;
@@ -447,7 +540,6 @@ int main() {
                   settings.preferences().codex_interval == 900,
               "Reset restores every appearance default without changing providers");
         auto custom = settings.preferences();
-        custom.appearance.font = 2;
         custom.appearance.show_resets = false;
         widget.set_preferences(custom);
         live.codex.installed = true;
@@ -455,7 +547,7 @@ int main() {
         for (int i = 0; i < actual.commands.length; ++i) {
             const auto& command = actual.commands.internalArray[i];
             if (command.commandType == CLAY_RENDER_COMMAND_TYPE_TEXT) {
-                check(command.renderData.text.fontId == 2, "Selected font reaches taskbar text");
+                check(command.renderData.text.fontId == 1, "Windows font reaches taskbar text");
                 const auto value = command.renderData.text.stringContents;
                 check(std::string(value.chars, static_cast<std::size_t>(value.length)).find("reset ") ==
                           std::string::npos,

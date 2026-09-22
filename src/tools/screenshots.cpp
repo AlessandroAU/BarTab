@@ -3,6 +3,7 @@
 // same machine produce identical PNGs.
 #include "ui/raylib_renderer.hpp"
 #include "ui/views.hpp"
+#include "windows/platform.hpp"
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -28,13 +29,13 @@ Usage demo_usage() {
     data.codex.plan = "ChatGPT Pro";
     data.codex.executable_path = "C:/Users/demo/AppData/Local/Codex/codex.exe";
     data.codex.windows = {{"5 hour", 62, session_reset}, {"Weekly", 81, weekly_reset}};
-    data.codex.updated = weekly_reset;
+    data.codex.updated = session_reset - 8100;
     data.claude.installed = true;
     data.claude.plan = "Claude Max";
     data.claude.executable_path = "C:/Users/demo/AppData/Local/Claude/claude.exe";
     data.claude.windows = {
         {"5 hour", 97, session_reset}, {"Weekly", 44, weekly_reset}, {"Fable weekly", 23, fable_reset}};
-    data.claude.updated = weekly_reset;
+    data.claude.updated = session_reset - 8100;
     return data;
 }
 
@@ -45,12 +46,14 @@ class Shooter {
     }
     // Renders one surface at `scale` for a crisp image on high-density displays.
     bool shoot(const char* name, ui::Surface surface, const Usage& data, const Preferences& preferences,
-               float width, float height, std::uint32_t backdrop, float scale = 2.f, bool hovered = false) {
+               float width, float height, std::uint32_t backdrop, float scale = 2.f, bool hovered = false, bool light = false) {
         Usage copy = data;
         ui::View view(surface, ui::Renderer::measure_callback, &renderer_);
         view.set_preferences(preferences);
+        view.set_reference_time(session_reset - 8040);
         view.set_hovered(hovered);
-        renderer_.set_scale(scale);
+        view.set_system_light(light);
+        renderer_.set_surface(scale, view.text_gamma());
         view.invalidate_measurements();
         // Two passes: widget state such as scroll extents settles on the second.
         view.frame(copy, {}, width, height);
@@ -81,9 +84,8 @@ int main(int argc, char** argv) {
     const std::filesystem::path directory = argc > 1 ? argv[1] : "docs/images";
     try {
         Shooter shooter(directory);
-        const auto fonts = std::filesystem::path("C:/Windows/Fonts");
-        shooter.renderer().load_font(1, fonts / "segoeui.ttf");
-        shooter.renderer().load_font(2, fonts / "consola.ttf");
+        if (!shooter.renderer().load_font_data(1, windows::windows_ui_font()))
+            throw std::runtime_error("Could not read the Windows UI font");
 
         const auto data = demo_usage();
         Preferences preferences;
@@ -106,7 +108,14 @@ int main(int argc, char** argv) {
                            claude_widget.width, claude_widget.height, taskbar_backdrop) &&
              ok;
 
-        const auto hover = ui::hover_size(data, appearance.text_percent);
+        auto hover = ui::hover_size(data, appearance.hover_text_percent);
+        hover.width = widget.width;
+        ui::View hover_layout(ui::Surface::Hover, ui::Renderer::measure_callback, &shooter.renderer());
+        hover_layout.set_preferences(preferences);
+        hover_layout.set_reference_time(session_reset - 8040);
+        shooter.renderer().set_surface(2.f, hover_layout.text_gamma());
+        auto hover_data = data;
+        hover.height = hover_layout.hover_height(hover_data, hover.width);
         ok = shooter.shoot("hover-card", ui::Surface::Hover, data, preferences, hover.width, hover.height,
                            page_backdrop, 2.f, true) &&
              ok;
@@ -115,6 +124,11 @@ int main(int argc, char** argv) {
         ok = shooter.shoot("settings", ui::Surface::Settings, data, preferences, 1120, 700, page_backdrop,
                            1.5f) &&
              ok;
+
+        ok = shooter.shoot("settings-light", ui::Surface::Settings, data, preferences, 1120, 700,
+                           0xF3F3F3, 1.5f, false, true) && ok;
+        ok = shooter.shoot("hover-card-light", ui::Surface::Hover, data, preferences, hover.width,
+                           hover.height, 0xF3F3F3, 2.f, false, true) && ok;
 
         if (!ok)
             return 1;

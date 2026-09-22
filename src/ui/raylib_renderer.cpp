@@ -37,6 +37,7 @@ struct Renderer::Impl {
         if (details_texture.id)
             UnloadRenderTexture(details_texture);
         FontCache_Unload(fonts);
+        ClayWidgets_UnloadShapes();
         CloseWindow();
     }
 };
@@ -47,14 +48,20 @@ bool Renderer::load_font(uint16_t id, const std::filesystem::path& path) {
     if (!file)
         return false;
     std::vector<unsigned char> bytes{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+    return load_font_data(id, std::move(bytes));
+}
+bool Renderer::load_font_data(uint16_t id, std::vector<unsigned char> bytes) {
     if (bytes.empty())
         return false;
     auto& data = impl_->font_data[id];
+    if (data == bytes)
+        return false;
     data = std::move(bytes);
     return FontCache_Register(impl_->fonts, id, data.data(), static_cast<int>(data.size()));
 }
-void Renderer::set_scale(float scale) {
+void Renderer::set_surface(float scale, float text_gamma) {
     impl_->fonts.dpiScale = scale;
+    impl_->fonts.textGamma = text_gamma > 0.f ? text_gamma : 1.f;
 }
 Clay_Dimensions Renderer::measure(Clay_StringSlice text, Clay_TextElementConfig* config) {
     return MeasureTextRaylib(text, config, &impl_->fonts);

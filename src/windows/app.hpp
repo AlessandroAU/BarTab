@@ -30,6 +30,8 @@ class App {
     ui::View hover_view_{ui::Surface::Hover, ui::Renderer::measure_callback, &renderer_};
     ui::Pixels hover_pixels_;
     bool hovered_{};
+    // Settings keep the hover card open beside the taskbar as a live preview.
+    bool hover_pinned_{};
     bool settings_mode_{};
     Preferences preferences_;
     SettingsEdit settings_edit_;
@@ -38,6 +40,8 @@ class App {
     ClayWidgets_Input details_pointer_{};
     unsigned widget_frames_{}, details_frames_{};
     float widget_scale_{}, details_scale_{};
+    int widget_text_percent_{};
+    int widget_spacing_percent_{100};
     TaskbarReader reader_;
     HWND controller_{}, widget_{}, popup_{}, hover_{};
     NOTIFYICONDATAW tray_{};
@@ -50,6 +54,7 @@ class App {
     const std::chrono::steady_clock::time_point started_{std::chrono::steady_clock::now()};
 
     void load_settings();
+    void update_system_font();
     bool save_settings(Preferences value);
     void begin_settings_preview();
     void preview_settings(Preferences value);
@@ -64,8 +69,12 @@ class App {
     static LRESULT CALLBACK controller_proc(HWND window, UINT message, WPARAM w, LPARAM l);
     static LRESULT CALLBACK widget_proc(HWND window, UINT message, WPARAM w, LPARAM l);
     static LRESULT CALLBACK hover_proc(HWND window, UINT message, WPARAM w, LPARAM l);
-    void hide_hover();
+    // A pinned card ignores pointer-driven hides unless forced.
+    void hide_hover(bool force = false);
     void show_hover();
+    void pin_hover();
+    void unpin_hover();
+    void avoid_hover(int& x, int& y, int width, int height, const RECT& work) const;
     static LRESULT CALLBACK popup_proc(HWND window, UINT message, WPARAM w, LPARAM l);
     void set_status(const std::wstring& value);
     void add_tray();

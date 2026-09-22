@@ -56,3 +56,7 @@ python tools/amalgamate-clay-widgets.py --source /path/to/patched/clay-widgets -
 Keep the backend and tests in sync with the patched checkout, changing their
 split-header includes to `clay-widgets.h`, and run the full test suite.
 Clay remains a separate dependency with its own license.
+
+The local slider `showThumb` option draws a thin track and visible handle while preserving upstream keyboard, focus, and pointer behavior. It defaults off for existing callers.
+
+Text drawing snaps glyph origins to device pixels and uses the atlas pixel size for both glyph advances and drawing, avoiding extra resampling at fractional DPI.

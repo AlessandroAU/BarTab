@@ -8,14 +8,13 @@ struct AppearanceField {
     const wchar_t* key;
     const char* name;
     int Appearance::*member;
+    // Missing keys copy this already-loaded member instead of the compiled default.
+    int Appearance::*fallback{};
 };
 constexpr AppearanceField appearance_fields[] = {
     {L"TextPercent", "TextPercent", &Appearance::text_percent},
-    {L"Font", "Font", &Appearance::font},
-    {L"Accent", "Accent", &Appearance::accent},
-    {L"Theme", "Theme", &Appearance::theme},
+    {L"HoverTextPercent", "HoverTextPercent", &Appearance::hover_text_percent, &Appearance::text_percent},
     {L"WidgetWidth", "WidgetWidth", &Appearance::widget_width},
-    {L"HoverWidth", "HoverWidth", &Appearance::hover_width},
     {L"HoverOpacity", "HoverOpacity", &Appearance::hover_opacity},
     {L"HoverDelay", "HoverDelay", &Appearance::hover_delay},
     {L"BarHeight", "BarHeight", &Appearance::bar_height},
@@ -34,7 +33,8 @@ Preferences read_settings(const std::filesystem::path& path) {
         return static_cast<int>(GetPrivateProfileIntW(section, key, fallback, absolute.c_str()));
     };
     for (const auto& field : appearance_fields)
-        value.appearance.*(field.member) = read(L"Appearance", field.key, value.appearance.*(field.member));
+        value.appearance.*(field.member) =
+            read(L"Appearance", field.key, value.appearance.*(field.fallback ? field.fallback : field.member));
     value.appearance.show_resets = read(L"Appearance", L"ShowResets", value.appearance.show_resets) != 0;
     value.appearance.hover_enabled =
         read(L"Appearance", L"HoverEnabled", value.appearance.hover_enabled) != 0;

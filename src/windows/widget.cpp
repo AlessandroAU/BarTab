@@ -19,6 +19,11 @@ LRESULT CALLBACK App::widget_proc(HWND window, UINT message, WPARAM w, LPARAM l)
         case WM_MOUSEACTIVATE:
             return MA_NOACTIVATE;
         case WM_MOUSEMOVE:
+            if (app->hover_ && IsWindowVisible(app->hover_)) {
+                KillTimer(app->hover_, 1);
+                TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, window, 0};
+                TrackMouseEvent(&tracking);
+            }
             if (app->preferences_.appearance.hover_enabled && !app->hovered_ &&
                 !(w & (MK_LBUTTON | MK_RBUTTON))) {
                 app->hovered_ = true;
@@ -33,7 +38,10 @@ LRESULT CALLBACK App::widget_proc(HWND window, UINT message, WPARAM w, LPARAM l)
             app->show_hover();
             return 0;
         case WM_MOUSELEAVE:
-            app->hide_hover();
+            if (app->hover_ && IsWindowVisible(app->hover_))
+                SetTimer(app->hover_, 1, 200, nullptr);
+            else
+                app->hide_hover();
             return 0;
         case WM_LBUTTONDOWN:
             app->hide_hover();
@@ -54,7 +62,7 @@ LRESULT CALLBACK App::widget_proc(HWND window, UINT message, WPARAM w, LPARAM l)
             app->show_menu();
             return 0;
         case WM_NCDESTROY:
-            app->hide_hover();
+            app->hide_hover(true);
             if (app->widget_ == window) {
                 app->widget_ = nullptr;
                 app->widget_bounds_ = {};
@@ -80,15 +88,51 @@ LRESULT CALLBACK App::hover_proc(HWND window, UINT message, WPARAM w, LPARAM l) 
             return 1;
         if (message == WM_MOUSEACTIVATE)
             return MA_NOACTIVATE;
-        if (message == WM_NCHITTEST)
-            return HTTRANSPARENT;
+        if (message == WM_MOUSEMOVE) {
+            KillTimer(window, 1);
+            TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, window, 0};
+            TrackMouseEvent(&tracking);
+            return 0;
+        }
+        if (message == WM_MOUSELEAVE) {
+            SetTimer(window, 1, 200, nullptr);
+            return 0;
+        }
+        if (message == WM_TIMER && w == 1) {
+            KillTimer(window, 1);
+            POINT pointer{};
+            RECT card{}, widget{};
+            GetCursorPos(&pointer);
+            GetWindowRect(window, &card);
+            GetWindowRect(app->widget_, &widget);
+            if (!PtInRect(&card, pointer) && !PtInRect(&widget, pointer))
+                app->hide_hover();
+            return 0;
+        }
+        if (message == WM_TIMER && w == 2) {
+            app->show_hover();
+            return 0;
+        }
     }
     return DefWindowProcW(window, message, w, l);
 }
 
-void App::hide_hover() {
-    if (hover_)
+void App::hide_hover(bool force) {
+    if (hover_pinned_ && !force) {
+        // Keep the preview card; only drop the widget's hover highlight.
+        if (hover_)
+            KillTimer(hover_, 1);
+        if (widget_ && IsWindow(widget_) && hovered_)
+            InvalidateRect(widget_, nullptr, FALSE);
+        hovered_ = false;
+        widget_view_.set_hovered(false);
+        return;
+    }
+    if (hover_) {
+        KillTimer(hover_, 1);
+        KillTimer(hover_, 2);
         ShowWindow(hover_, SW_HIDE);
+    }
     if (widget_ && IsWindow(widget_)) {
         TRACKMOUSEEVENT tracking{sizeof(tracking), TME_CANCEL | TME_HOVER | TME_LEAVE, widget_, 0};
         TrackMouseEvent(&tracking);
@@ -99,8 +143,18 @@ void App::hide_hover() {
     widget_view_.set_hovered(false);
 }
 
+void App::pin_hover() {
+    hover_pinned_ = true;
+    show_hover();
+}
+
+void App::unpin_hover() {
+    hover_pinned_ = false;
+    hide_hover();
+}
+
 void App::show_hover() {
-    if (!preferences_.appearance.hover_enabled || !hovered_ || !IsWindowVisible(widget_) ||
+    if (!preferences_.appearance.hover_enabled || !(hovered_ || hover_pinned_) || !IsWindowVisible(widget_) ||
         widget_bounds_.empty())
         return;
     if (!hover_) {
@@ -115,8 +169,11 @@ void App::show_hover() {
         LWA_ALPHA);
     const UINT dpi = GetDpiForWindow(widget_);
     const float scale = dpi ? dpi / 96.f : 1.f;
-    auto logical = ui::hover_size(usage_, preferences_.appearance.text_percent);
-    logical.width = preferences_.appearance.hover_width * preferences_.appearance.text_percent / 100.f;
+    auto logical = ui::hover_size(usage_, preferences_.appearance.hover_text_percent);
+    logical.width = widget_bounds_.width / scale;
+    renderer_.set_surface(scale, hover_view_.text_gamma());
+    hover_view_.invalidate_measurements();
+    if (usage_.live) logical.height = hover_view_.hover_height(usage_, logical.width);
     int width = static_cast<int>(std::lround(logical.width * scale));
     const int height = static_cast<int>(std::lround(logical.height * scale));
     RECT anchor{widget_bounds_.x, widget_bounds_.y, widget_bounds_.right(), widget_bounds_.bottom()};
@@ -131,16 +188,15 @@ void App::show_hover() {
                            std::min(widget_bounds_.y - height - static_cast<int>(8 * scale),
                                     static_cast<int>(monitor.rcWork.bottom) - height));
     SetWindowPos(hover_, HWND_TOPMOST, x, y, width, height, SWP_NOACTIVATE);
-    renderer_.set_scale(scale);
-    hover_view_.invalidate_measurements();
     const auto frame = hover_view_.frame(usage_, {}, logical.width, logical.height);
     hover_pixels_ = renderer_.render(frame.commands, width, height, scale, false);
     InvalidateRect(hover_, nullptr, FALSE);
     ShowWindow(hover_, SW_SHOWNOACTIVATE);
+    SetTimer(hover_, 2, 60000, nullptr);
 }
 
 void App::reset_widget() {
-    hide_hover();
+    hide_hover(true);
     if (widget_ && IsWindow(widget_))
         DestroyWindow(widget_);
     widget_ = nullptr;
@@ -148,13 +204,25 @@ void App::reset_widget() {
 }
 
 void App::hide_widget() {
-    hide_hover();
+    hide_hover(true);
     if (widget_)
         ShowWindow(widget_, SW_HIDE);
     widget_bounds_ = {};
 }
 
 void App::tick() {
+    const bool app_light = apps_light_theme();
+    const auto os_accent = windows_accent();
+    const bool details_light_changed = details_view_.set_system_light(app_light);
+    const bool details_accent_changed = details_view_.set_system_accent(os_accent);
+    const bool hover_light_changed = hover_view_.set_system_light(app_light);
+    const bool hover_accent_changed = hover_view_.set_system_accent(os_accent);
+    if ((details_light_changed || details_accent_changed) && IsWindowVisible(popup_))
+        render_details(details_pointer_);
+    if ((hover_light_changed || hover_accent_changed) && IsWindowVisible(hover_))
+        show_hover();
+    if (widget_view_.set_system_accent(os_accent) && widget_)
+        InvalidateRect(widget_, nullptr, FALSE);
     if (widget_view_.set_system_light(system_light_theme()) && widget_)
         InvalidateRect(widget_, nullptr, FALSE);
     const auto snapshot = reader_.latest();
@@ -170,11 +238,13 @@ void App::tick() {
         set_status(L"Taskbar layout is stale. Waiting for Explorer.");
     } else {
         const double scale = snapshot.dpi / 96.0;
-        const auto logical = ui::widget_size(usage_, preferences_.appearance);
-        auto target = find_space(snapshot.bounds, snapshot.occupied,
-                                 static_cast<int>(std::lround(logical.width * scale)),
-                                 static_cast<int>(std::lround(widget_height * scale)),
-                                 static_cast<int>(std::ceil(8 * scale)), preferences_.appearance.position);
+        const auto placement = ui::place_widget(usage_, preferences_.appearance, snapshot.bounds,
+                                                 snapshot.occupied, static_cast<float>(scale));
+        const auto target = placement.bounds;
+        const bool text_changed = widget_text_percent_ != placement.text_percent ||
+                                  widget_spacing_percent_ != placement.spacing_percent;
+        widget_spacing_percent_ = placement.spacing_percent;
+        widget_text_percent_ = placement.text_percent;
         if (target.empty()) {
             hide_widget();
             set_status(L"No free taskbar space. Use the tray icon.");
@@ -188,13 +258,17 @@ void App::tick() {
                 // Per-pixel alpha is supplied by paint_widget. Do not call
                 // SetLayeredWindowAttributes: it disables UpdateLayeredWindow.
             }
-            const bool unchanged = widget_ && IsWindowVisible(widget_) && target == widget_bounds_;
+            const bool unchanged = !text_changed && widget_ && IsWindowVisible(widget_) && target == widget_bounds_;
             if (widget_ && (unchanged || SetWindowPos(widget_, HWND_TOP, target.x - snapshot.bounds.x,
                                                       target.y - snapshot.bounds.y, target.width,
                                                       target.height, SWP_NOACTIVATE | SWP_SHOWWINDOW))) {
                 widget_bounds_ = target;
                 if (!unchanged) {
-                    hide_hover();
+                    // A pinned preview follows the widget; a pointer card closes.
+                    if (hover_pinned_)
+                        show_hover();
+                    else
+                        hide_hover();
                     InvalidateRect(widget_, nullptr, FALSE);
                 }
                 set_status(L"Embedded in the primary taskbar");
@@ -218,12 +292,16 @@ void App::paint_widget(HWND window) {
     GetClientRect(window, &bounds);
     if (bounds.right > 0 && bounds.bottom > 0) {
         const float scale = static_cast<float>(bounds.bottom) / widget_height;
-        renderer_.set_scale(scale);
+        renderer_.set_surface(scale, widget_view_.text_gamma());
         if (widget_scale_ != scale) {
             widget_view_.invalidate_measurements();
             widget_scale_ = scale;
         }
+        widget_view_.set_widget_spacing(widget_spacing_percent_);
+        const int requested_percent = widget_view_.text_percent();
+        widget_view_.set_text_percent(widget_text_percent_ > 0 ? widget_text_percent_ : requested_percent);
         const auto frame = widget_view_.frame(usage_, {}, bounds.right / scale, widget_height);
+        widget_view_.set_text_percent(requested_percent);
         const auto pixels = renderer_.render(frame.commands, bounds.right, bounds.bottom, scale, true);
         HDC dc = GetDC(nullptr);
         HDC buffer = CreateCompatibleDC(dc);
