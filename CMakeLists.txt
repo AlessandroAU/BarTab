@@ -4,8 +4,29 @@ project(UsageTracker VERSION 0.3.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+option(USAGETRACKER_ENABLE_LTO "Enable link-time optimization in Release and MinSizeRel" ON)
+if(USAGETRACKER_ENABLE_LTO)
+    include(CheckIPOSupported)
+    check_ipo_supported(LANGUAGES C CXX)
+    # Set before creating targets so static dependencies also participate.
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_MINSIZEREL ON)
+endif()
+
 if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    # Size optimization and individually discardable functions/global data,
+    # including vendored C libraries that reset directory compile options.
+    foreach(language C CXX)
+        foreach(configuration RELEASE MINSIZEREL)
+            string(REGEX REPLACE "/O[12]" "/O1"
+                CMAKE_${language}_FLAGS_${configuration} "${CMAKE_${language}_FLAGS_${configuration}}")
+            string(APPEND CMAKE_${language}_FLAGS_${configuration} " /Gy /Gw")
+        endforeach()
+    endforeach()
+    # MSVC emits debug symbols separately; omit release debug records and PDBs.
+    add_link_options("$<$<CONFIG:Release,MinSizeRel>:/OPT:REF;/OPT:ICF;/INCREMENTAL:NO;/DEBUG:NONE>")
     add_compile_options(/W4 /WX /permissive- /utf-8)
 else()
     add_compile_options(-Wall -Wextra -Wpedantic -Werror)
@@ -107,6 +128,16 @@ if(WIN32)
     target_include_directories(UsageTracker PRIVATE assets)
     target_link_libraries(UsageTracker PRIVATE usage_renderer user32 gdi32 shell32 ole32 oleaut32 uiautomationcore dwmapi advapi32)
     target_link_options(UsageTracker PRIVATE "/MANIFEST:EMBED" "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/app.manifest")
+
+    # Regenerates the README images offscreen. Not part of the test suite: it
+    # needs a GPU context and writes into the source tree.
+    add_executable(screenshots src/tools/screenshots.cpp)
+    target_link_libraries(screenshots PRIVATE usage_renderer)
+    add_custom_target(docs-screenshots
+        COMMAND screenshots "${CMAKE_CURRENT_SOURCE_DIR}/docs/images"
+        DEPENDS screenshots
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        COMMENT "Rendering README screenshots")
     if(BUILD_TESTING)
         add_executable(discovery_tests tests/discovery_tests.cpp src/windows/discovery.cpp)
         target_include_directories(discovery_tests PRIVATE src)

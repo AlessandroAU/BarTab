@@ -126,7 +126,8 @@ void App::tick() {
         const double scale = snapshot.dpi / 96.0;
         const auto logical=ui::widget_size(usage_,preferences_.appearance);
         auto target = find_space(snapshot.bounds,snapshot.occupied,static_cast<int>(std::lround(logical.width * scale)),
-            static_cast<int>(std::lround(widget_height * scale)),static_cast<int>(std::ceil(8 * scale)));
+            static_cast<int>(std::lround(widget_height * scale)),static_cast<int>(std::ceil(8 * scale)),
+            preferences_.appearance.position);
         if (target.empty()) { hide_widget(); set_status(L"No free taskbar space. Use the tray icon."); }
         else {
             if (!widget_) {

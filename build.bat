@@ -18,6 +18,9 @@ if errorlevel 1 (
     echo CMake configure failed. Install the Visual Studio Desktop development with C++ workload and Windows SDK.
     exit /b 1
 )
+rem Stop installed and build-tree instances so their executables are not locked.
+taskkill /F /IM UsageTracker.exe >nul 2>&1
+rem No existing process is normal; the build command supplies the next exit code.
 cmake --build "%~dp0build" --config "%configuration%"
 if errorlevel 1 exit /b 1
 ctest --test-dir "%~dp0build" -C "%configuration%" --output-on-failure

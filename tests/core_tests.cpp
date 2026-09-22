@@ -32,6 +32,38 @@ void placement_tests() {
         for (auto block : blocks) require(!candidate.intersects(block), "Collision invariant");
     }
 }
+void placement_preference_tests() {
+    Rect panel{0, 1152, 1920, 48};
+    // Two gaps fit a 208-wide widget here: 166..576 and 1345..1558.
+    const std::vector<Rect> occupied{{6,1152,152,48}, {584,1152,753,48}, {1566,1152,354,48}};
+    require(find_space(panel, occupied,208,38,8,100) == find_space(panel, occupied,208,38,8),
+        "Hard right is the unchanged default");
+    require(find_space(panel, occupied,208,38,8,0) == Rect{166,1157,208,38}, "0% reaches the first gap");
+    require(find_space(panel, occupied,208,38,8,100) == Rect{1350,1157,208,38}, "100% reaches the last gap");
+    // The middle of this taskbar is covered, so 50% sits as close to it as the nearest gap allows.
+    require(find_space(panel, occupied,208,38,8,50) == Rect{368,1157,208,38}, "50% picks the nearest gap");
+    // Within a gap the slider positions the widget directly.
+    require(find_space(panel, occupied,208,38,8,20) == Rect{347,1157,208,38}, "Intermediate position inside a gap");
+    // A clear taskbar honours the percentage exactly.
+    require(find_space(panel, {},208,38,8,0) == Rect{8,1157,208,38}, "0% on an empty taskbar");
+    require(find_space(panel, {},208,38,8,50) == Rect{856,1157,208,38}, "50% on an empty taskbar");
+    require(find_space(panel, {},208,38,8,100) == Rect{1704,1157,208,38}, "100% on an empty taskbar");
+    require(find_space(panel, {},208,38,8,25) == Rect{432,1157,208,38}, "25% on an empty taskbar");
+    // Out-of-range values clamp rather than escaping the panel.
+    require(find_space(panel, {},208,38,8,-50) == find_space(panel, {},208,38,8,0), "Below 0% clamps");
+    require(find_space(panel, {},208,38,8,150) == find_space(panel, {},208,38,8,100), "Above 100% clamps");
+    // Sliding across the whole range never overlaps a button or leaves the panel.
+    int distinct = 0;
+    Rect previous{};
+    for (int position = 0; position <= 100; ++position) {
+        auto candidate = find_space(panel, occupied,208,38,8,position);
+        require(!candidate.empty(), "A gap fits at every position");
+        require(candidate.x >= 8 && candidate.right() <= panel.width - 8, "Positioned widget stays in the panel");
+        for (auto block : occupied) require(!candidate.intersects(block), "Position never overlaps a button");
+        if (!(candidate == previous)) { ++distinct; previous = candidate; }
+    }
+    require(distinct > 10, "The slider moves the widget across many positions");
+}
 void preference_tests() {
     Preferences settings;
     require(settings.appearance.text_percent==150,"Default text size is 150 percent");
@@ -58,6 +90,6 @@ void usage_tests() {
 }
 }
 int main() {
-    try { placement_tests(); usage_tests(); preference_tests(); std::cout << "PASS: placement, collision invariants, scaling, usage limits and warning thresholds.\n"; return 0; }
+    try { placement_tests(); placement_preference_tests(); usage_tests(); preference_tests(); std::cout << "PASS: placement, position preferences, collision invariants, scaling, usage limits and warning thresholds.\n"; return 0; }
     catch (const std::exception& error) { std::cerr << "FAIL: " << error.what() << '\n'; return 1; }
 }

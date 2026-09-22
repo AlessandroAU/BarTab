@@ -21,6 +21,9 @@ public:
     void set_scale(float scale);
     bool load_font(uint16_t id, const std::filesystem::path& path);
     Pixels render(Clay_RenderCommandArray, int width, int height, float scale, bool hit_background);
+    // Composites the premultiplied result over an opaque 0xRRGGBB backdrop and
+    // writes a PNG. Used by the screenshot tool to regenerate the README images.
+    static bool save_png(const Pixels& pixels, const std::filesystem::path& path, std::uint32_t background);
     static Clay_Dimensions measure_callback(Clay_StringSlice text, Clay_TextElementConfig* config, void* user);
 private:
     struct Impl;

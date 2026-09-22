@@ -5,7 +5,7 @@ These files are part of the source tree. Building does not clone repositories, f
 | Dependency | Upstream revision | Included files | License |
 | --- | --- | --- | --- |
 | [Clay](https://github.com/nicbarker/clay) | `e6cc36941ab2af5d81107617039d6f527a1c660b` | `clay/clay.h` (unmodified), `clay/LICENSE.md` | zlib |
-| [clay-widgets](https://github.com/AlessandroAU/clay-widgets) | `a792af227edebd0265b0742f80fdfcde9ff0fa18` | Widget headers, headless test suite, MIT license | MIT |
+| [clay-widgets](https://github.com/AlessandroAU/clay-widgets) | `f6e955be6e5df9c23ac48966233c5caf16a3c176` | Widget headers, headless test suite, MIT license | MIT |
 | [raylib](https://github.com/raysan5/raylib) | `caadb48e259028233515777a3e6402040c497309` | Source, bundled GLFW, CMake files and licenses | zlib; bundled licenses retained in source |
 | clay-widgets raylib backend | Same clay-widgets revision above | `clay-widgets/backends/raylib/` | MIT |
 | [nlohmann/json](https://github.com/nlohmann/json) | `v3.11.3` | Unmodified single header `nlohmann/json.hpp` and `LICENSE.MIT` | MIT |
@@ -34,6 +34,6 @@ target_link_libraries(your_target PRIVATE clay_widgets)
 
 Then include `<clay.h>` and `<clay-widgets/widgets.h>` without defining implementation macros. `src/ui/clay_widgets.cpp` owns both implementations. Third-party warnings are suppressed only for that implementation target and the imported upstream test target; the application's warning-as-error policy remains enabled.
 
-`clay_widgets_tests` runs the upstream headless suite (418 checks). It has its own implementation instance, following upstream's test harness. `clay_link_test` separately verifies that a consumer can link the static library and generate render commands without implementation macros. Both are registered with CTest alongside the existing core tests.
+`clay_widgets_tests` runs the upstream headless suite (566 checks). It has its own implementation instance, following upstream's test harness. `clay_link_test` separately verifies that a consumer can link the static library and generate render commands without implementation macros. Both are registered with CTest alongside the existing core tests.
 
 For an update, replace the included files from pinned upstream revisions, preserve licenses, reapply/review the compatibility diff, and run the full tests on MSVC and Linux GCC. Renderer/font dependencies are separate from the headless widget library; the upstream demo is not included. Raylib/GLFW are built statically with MSVC for the Windows renderer. Their bundled source license notices are preserved.

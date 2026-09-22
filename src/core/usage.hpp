@@ -15,7 +15,12 @@ struct Rect {
     bool operator==(const Rect& other) const;
 };
 
-Rect find_space(Rect panel, const std::vector<Rect>& occupied, int width, int height, int gap);
+// `position` is where along the taskbar the widget prefers to sit, as a
+// percentage from the left edge: 0 hard left, 50 centred, 100 hard right. The
+// widget lands in whichever free gap gets closest to that point, so a preference
+// can never place it underneath a taskbar button.
+Rect find_space(Rect panel, const std::vector<Rect>& occupied, int width, int height, int gap,
+    int position = 100);
 
 struct Allowance {
     std::string label;

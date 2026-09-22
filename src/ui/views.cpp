@@ -134,13 +134,14 @@ void View::settings_panel(const Usage& data, Frame& result, ClayWidgets_Input in
                 static const char* themes[]={"Midnight","Slate"};
                 result.changed=choice_dropdown("ThemeChoice","Theme",themes,2,a.theme) || result.changed;
                 result.changed=setting_slider("WidgetWidth","Widget width",a.widget_width,100,400,10," px") || result.changed;
+                result.changed=setting_slider("WidgetPosition","Taskbar position",a.position,0,100,1,"% from left") || result.changed;
                 result.changed=setting_slider("BarHeight","Bar thickness",a.bar_height,3,9,1," px") || result.changed;
                 result.changed=setting_slider("CornerRadius","Corner radius",a.corner_radius,0,12,1," px") || result.changed;
                 result.changed=ClayWidgets_Checkbox(widgets_.get(),CLAY_ID("ShowResets"),CLAY_STRING("Show taskbar reset labels"),&a.show_resets) || result.changed;
                 result.changed=ClayWidgets_Checkbox(widgets_.get(),CLAY_ID("HoverEnabled"),CLAY_STRING("Show hover card"),&a.hover_enabled) || result.changed;
                 result.changed=setting_slider("HoverWidth","Hover width",a.hover_width,240,600,20," px") || result.changed;
                 result.changed=setting_slider("HoverOpacity","Hover opacity",a.hover_opacity,50,100,1,"%") || result.changed;
-                result.changed=setting_slider("HoverDelay","Hover delay",a.hover_delay,100,1500,50," ms") || result.changed;
+                result.changed=setting_slider("HoverDelay","Hover delay",a.hover_delay,50,1500,50," ms") || result.changed;
                 wrapped_text("Font and text size apply to the taskbar and hover card. Scroll for more appearance controls.",settings_help,{166,187,208,255});
                 ClayWidgets_EndScrollPanel(widgets_.get(),CLAY_ID("AppearanceScroll"));
             }
@@ -201,8 +202,9 @@ void View::settings_panel(const Usage& data, Frame& result, ClayWidgets_Input in
             result.refresh=ClayWidgets_Button(widgets_.get(),CLAY_ID("RefreshUsage"),CLAY_STRING("Refresh usage and detection"));
             Clay_ElementDeclaration spacer{}; spacer.layout.sizing.width=CLAY_SIZING_GROW(0);
             CLAY_AUTO_ID(spacer) {}
-            result.save=ClayWidgets_Button(widgets_.get(),CLAY_ID("SaveSettings"),CLAY_STRING("Save settings"));
             result.close=ClayWidgets_Button(widgets_.get(),CLAY_ID("CancelSettings"),CLAY_STRING("Cancel")) || input.keyEscape;
+            ClayWidgets_ButtonOptions save{}; save.variant=CLAY_WIDGETS_BUTTON_PRIMARY;
+            result.save=ClayWidgets_ButtonEx(widgets_.get(),CLAY_ID("SaveSettings"),CLAY_STRING("Save settings"),save);
         }
     }
 }

@@ -11,7 +11,8 @@ constexpr AppearanceField appearance_fields[] = {
     {L"Accent","Accent",&Appearance::accent}, {L"Theme","Theme",&Appearance::theme},
     {L"WidgetWidth","WidgetWidth",&Appearance::widget_width}, {L"HoverWidth","HoverWidth",&Appearance::hover_width},
     {L"HoverOpacity","HoverOpacity",&Appearance::hover_opacity}, {L"HoverDelay","HoverDelay",&Appearance::hover_delay},
-    {L"BarHeight","BarHeight",&Appearance::bar_height}, {L"CornerRadius","CornerRadius",&Appearance::corner_radius}
+    {L"BarHeight","BarHeight",&Appearance::bar_height}, {L"CornerRadius","CornerRadius",&Appearance::corner_radius},
+    {L"Position","Position",&Appearance::position}
 };
 }
 void App::load_settings() {

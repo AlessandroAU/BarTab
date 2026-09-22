@@ -203,7 +203,7 @@ void App::finish_smoke_test() {
     BYTE opacity{}; DWORD layered_flags{};
     const bool compact_hover = IsWindowVisible(hover_) && GetForegroundWindow() == foreground &&
         hover_view_.bounds("HoverCodex").width > 0 && hover_view_.bounds("HoverClaude").width > 0 &&
-        GetLayeredWindowAttributes(hover_,nullptr,&opacity,&layered_flags) && opacity == 237 && (layered_flags & LWA_ALPHA);
+        GetLayeredWindowAttributes(hover_,nullptr,&opacity,&layered_flags) && opacity == 242 && (layered_flags & LWA_ALPHA);
     UpdateWindow(hover_); DwmFlush();
     capture_widget(window_rect(hover_),executable_directory() / L"combined-hover.bmp");
     hide_hover();
@@ -253,7 +253,7 @@ void App::finish_smoke_test() {
         GetPrivateProfileIntW(L"Providers",L"Codex",1,settings_path_.c_str()) == 0 &&
         GetPrivateProfileIntW(L"Providers",L"Claude",0,settings_path_.c_str()) == 1 &&
         GetPrivateProfileIntW(L"Providers",L"CodexInterval",0,settings_path_.c_str()) == 900 &&
-        GetPrivateProfileIntW(L"Appearance",L"HoverOpacity",0,settings_path_.c_str()) == 93;
+        GetPrivateProfileIntW(L"Appearance",L"HoverOpacity",0,settings_path_.c_str()) == 95;
     open_details();
     click_setting("EnableClaude");
     const bool all_disabled_preview = !usage_.codex_enabled && !usage_.claude_enabled;

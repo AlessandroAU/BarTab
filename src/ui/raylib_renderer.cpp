@@ -89,4 +89,29 @@ Pixels Renderer::render(Clay_RenderCommandArray commands, int width, int height,
     UnloadImage(image);
     return result;
 }
+bool Renderer::save_png(const Pixels& pixels, const std::filesystem::path& path, std::uint32_t background) {
+    if (pixels.width <= 0 || pixels.height <= 0) return false;
+    const auto back_r = static_cast<int>((background >> 16) & 0xff);
+    const auto back_g = static_cast<int>((background >> 8) & 0xff);
+    const auto back_b = static_cast<int>(background & 0xff);
+    std::vector<unsigned char> rgba(static_cast<std::size_t>(pixels.width) * pixels.height * 4);
+    for (std::size_t i = 0; i < pixels.data.size(); ++i) {
+        const auto value = pixels.data[i];
+        // The widget surface marks its transparent hit-test area as 0x01000000.
+        const int alpha = static_cast<int>((value >> 24) & 0xff) <= 1 ? 0 : static_cast<int>((value >> 24) & 0xff);
+        const int source_r = static_cast<int>((value >> 16) & 0xff);
+        const int source_g = static_cast<int>((value >> 8) & 0xff);
+        const int source_b = static_cast<int>(value & 0xff);
+        // Source RGB is premultiplied, so compositing is source + backdrop*(1-a).
+        const auto over = [&](int source, int back) {
+            return static_cast<unsigned char>(std::clamp(source + back * (255 - alpha) / 255, 0, 255));
+        };
+        rgba[i*4+0] = over(alpha ? source_r : 0, back_r);
+        rgba[i*4+1] = over(alpha ? source_g : 0, back_g);
+        rgba[i*4+2] = over(alpha ? source_b : 0, back_b);
+        rgba[i*4+3] = 255;
+    }
+    Image image{rgba.data(),pixels.width,pixels.height,1,PIXELFORMAT_UNCOMPRESSED_R8G8B8A8};
+    return ExportImage(image,path.string().c_str());
+}
 } // namespace usage::ui
