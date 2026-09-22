@@ -1,5 +1,6 @@
 #pragma once
 #include "windows/taskbar.hpp"
+#include "core/settings_edit.hpp"
 #include "windows/providers.hpp"
 #include "ui/raylib_renderer.hpp"
 #include <shellapi.h>
@@ -13,25 +14,25 @@ inline constexpr wchar_t popup_class[] = L"UsageTracker.Popup.Cpp";
 inline constexpr wchar_t hover_class[] = L"UsageTracker.Hover.Cpp";
 
 class App {
-public:
+  public:
     explicit App(bool smoke, bool live_test = false);
     ~App();
     App(const App&) = delete;
     App& operator=(const App&) = delete;
     int run();
-private:
+
+  private:
     Usage usage_;
     std::unique_ptr<UsageReader> codex_, claude_;
     ui::Renderer renderer_;
-    ui::View widget_view_{ui::Surface::Widget,ui::Renderer::measure_callback,&renderer_};
-    ui::View details_view_{ui::Surface::Details,ui::Renderer::measure_callback,&renderer_};
-    ui::View hover_view_{ui::Surface::Hover,ui::Renderer::measure_callback,&renderer_};
+    ui::View widget_view_{ui::Surface::Widget, ui::Renderer::measure_callback, &renderer_};
+    ui::View details_view_{ui::Surface::Details, ui::Renderer::measure_callback, &renderer_};
+    ui::View hover_view_{ui::Surface::Hover, ui::Renderer::measure_callback, &renderer_};
     ui::Pixels hover_pixels_;
     bool hovered_{};
     bool settings_mode_{};
     Preferences preferences_;
-    bool settings_preview_{};
-    Preferences original_preferences_;
+    SettingsEdit settings_edit_;
     std::filesystem::path settings_path_;
     ui::Pixels details_pixels_;
     ClayWidgets_Input details_pointer_{};
@@ -49,8 +50,11 @@ private:
     const std::chrono::steady_clock::time_point started_{std::chrono::steady_clock::now()};
 
     void load_settings();
-    bool save_settings();
-    void apply_text_size();
+    bool save_settings(Preferences value);
+    void begin_settings_preview();
+    void preview_settings(Preferences value);
+    void cancel_settings_preview();
+    void apply_view_preferences();
     void apply_providers();
     void apply_preferences(Preferences value);
     void detect_providers();

@@ -99,6 +99,8 @@ The taskbar bitmap uses a background alpha of 1/255, so it looks transparent but
 | `vendor/` | Pinned dependencies, embedded font, licenses, compatibility patch. |
 | `tests/` | Core, UI interaction, and library linkage tests. |
 
+Settings file I/O lives in `src/windows/settings_store.*`; the portable `SettingsEdit` owns the cancel snapshot. The Windows host applies previews and commits an edit only after saving succeeds. Preference limits are shared by normalization and UI controls.
+
 Keep portable state in `src/core`, layouts in `src/ui`, and OS integration in `src/windows`. The application owns its renderer and views for their whole lifetime, and the renderer must outlive the views.
 
 ## Providers and detection
@@ -107,17 +109,29 @@ Detection checks the `USAGETRACKER_CODEX` / `USAGETRACKER_CLAUDE` overrides firs
 
 Detection repeats at each provider's interval, when Settings opens, and on manual refresh, so installing a provider recovers without a restart.
 
+Provider protocol messages live in `src/core/provider_protocol.*` and are tested offline. `src/windows/process_transport.*` owns the process tree, pipes, line framing, timeout, and cancellation checks. `service_discovery.*` builds search locations; `providers.*` schedules polling and publishes readings.
+
 For usage, a background worker starts a hidden `codex app-server --listen stdio://`, completes the initialize handshake, calls `account/rateLimits/read`, and closes the managed process tree. Claude has an independent worker using the headless `initialize` / `get_usage` control protocol in safe mode, with no session persistence and no model prompt. Requests time out after 20 seconds. The widget never reads or stores credentials — each CLI handles its own authentication.
 
 Remaining percentage is derived from used percentage; it is not an exact token budget. Missing reset times show as unavailable, and last-good values are kept in memory only. Claude's control protocol was verified against version 2.1.269 and may change.
 
 ## Testing
 
+Application C++ sources and tests use the root `.clang-format` configuration
+(clang-format 18). To format them from PowerShell:
+
+```powershell
+$sources = Get-ChildItem src,tests -Recurse -File -Include *.cpp,*.hpp
+clang-format -i ($sources.FullName)
+```
+
+Keep vendored dependencies out of formatting passes.
+
 ```powershell
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-Eight suites cover placement, allowance limits, Clay layouts, pointer dragging, focus, keyboard navigation, library linkage, and the upstream clay-widgets suite (566 checks). Checks stay active in Release builds.
+Twelve suites cover provider protocols, process transport, settings persistence and cancellation, placement, allowance limits, Clay layouts, pointer dragging, focus, keyboard navigation, library linkage, and the upstream clay-widgets suite (566 checks). Checks stay active in Release builds.
 
 A live desktop smoke test exercises the real taskbar, hit detection, native mouse messages routed into Clay, and settings save/cancel. Run it unlocked with no other instance:
 

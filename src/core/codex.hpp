@@ -5,4 +5,4 @@
 namespace usage {
 // Parse the result of account/rateLimits/read, not the JSON-RPC envelope.
 AccountUsage parse_codex_limits(std::string_view json);
-}
+} // namespace usage

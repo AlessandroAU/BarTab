@@ -17,13 +17,14 @@ struct Snapshot {
 
 // The worker owns all COM objects. Only plain data crosses to the UI thread.
 class TaskbarReader {
-public:
+  public:
     TaskbarReader();
     ~TaskbarReader();
     TaskbarReader(const TaskbarReader&) = delete;
     TaskbarReader& operator=(const TaskbarReader&) = delete;
     Snapshot latest() const;
-private:
+
+  private:
     struct State;
     std::shared_ptr<State> state_;
 };

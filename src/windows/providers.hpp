@@ -1,21 +1,20 @@
 #pragma once
-#include "core/usage.hpp"
+#include "windows/service_discovery.hpp"
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
 
 namespace usage::windows {
-enum class Service { Codex, Claude };
-void detect_service(Service service, AccountUsage& result);
 class UsageReader {
-public:
+  public:
     explicit UsageReader(Service service = Service::Codex, AccountUsage initial = {});
     ~UsageReader();
     void refresh();
     void set_interval(int seconds);
     bool take(AccountUsage& result);
-private:
+
+  private:
     void run();
     Service service_;
     std::mutex mutex_;
@@ -26,4 +25,4 @@ private:
     AccountUsage latest_;
     std::thread worker_;
 };
-}
+} // namespace usage::windows

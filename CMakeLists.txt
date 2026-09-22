@@ -32,7 +32,7 @@ else()
     add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 endif()
 
-add_library(usage_core STATIC src/core/usage.cpp src/core/codex.cpp src/core/claude.cpp)
+add_library(usage_core STATIC src/core/usage.cpp src/core/codex.cpp src/core/claude.cpp src/core/provider_protocol.cpp)
 target_include_directories(usage_core SYSTEM PRIVATE vendor/nlohmann)
 if(MSVC)
     target_compile_definitions(usage_core PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -57,6 +57,13 @@ target_link_libraries(usage_ui PUBLIC usage_core clay_widgets)
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(provider_protocol_tests tests/provider_protocol_tests.cpp)
+    target_link_libraries(provider_protocol_tests PRIVATE usage_core)
+    target_include_directories(provider_protocol_tests SYSTEM PRIVATE vendor/nlohmann)
+    add_test(NAME provider_protocol COMMAND provider_protocol_tests)
+    add_executable(settings_edit_tests tests/settings_edit_tests.cpp)
+    target_link_libraries(settings_edit_tests PRIVATE usage_core)
+    add_test(NAME settings_edit COMMAND settings_edit_tests)
     add_executable(claude_tests tests/claude_tests.cpp)
     target_link_libraries(claude_tests PRIVATE usage_core)
     add_test(NAME claude_limits COMMAND claude_tests)
@@ -115,7 +122,10 @@ if(WIN32)
         src/windows/app.cpp
         src/windows/platform.cpp
         src/windows/settings.cpp
+        src/windows/settings_store.cpp
         src/windows/providers.cpp
+        src/windows/process_transport.cpp
+        src/windows/service_discovery.cpp
         src/windows/discovery.cpp
         src/windows/startup.cpp
         src/windows/widget.cpp
@@ -124,7 +134,6 @@ if(WIN32)
         src/windows/taskbar.cpp
     )
     target_compile_definitions(UsageTracker PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
-    target_include_directories(UsageTracker SYSTEM PRIVATE vendor/nlohmann)
     target_include_directories(UsageTracker PRIVATE assets)
     target_link_libraries(UsageTracker PRIVATE usage_renderer user32 gdi32 shell32 ole32 oleaut32 uiautomationcore dwmapi advapi32)
     target_link_options(UsageTracker PRIVATE "/MANIFEST:EMBED" "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/app.manifest")
@@ -139,6 +148,15 @@ if(WIN32)
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         COMMENT "Rendering README screenshots")
     if(BUILD_TESTING)
+        add_executable(process_transport_tests tests/process_transport_tests.cpp src/windows/process_transport.cpp)
+        target_include_directories(process_transport_tests PRIVATE src)
+        target_compile_definitions(process_transport_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+        add_test(NAME process_transport COMMAND process_transport_tests)
+        set_tests_properties(process_transport PROPERTIES TIMEOUT 15)
+        add_executable(settings_store_tests tests/settings_store_tests.cpp src/windows/settings_store.cpp)
+        target_include_directories(settings_store_tests PRIVATE src)
+        target_compile_definitions(settings_store_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+        add_test(NAME settings_store COMMAND settings_store_tests)
         add_executable(discovery_tests tests/discovery_tests.cpp src/windows/discovery.cpp)
         target_include_directories(discovery_tests PRIVATE src)
         add_test(NAME executable_discovery COMMAND discovery_tests)

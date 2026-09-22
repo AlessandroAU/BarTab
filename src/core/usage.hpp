@@ -8,9 +8,15 @@
 namespace usage {
 struct Rect {
     int x{}, y{}, width{}, height{};
-    int right() const { return x + width; }
-    int bottom() const { return y + height; }
-    bool empty() const { return width <= 0 || height <= 0; }
+    int right() const {
+        return x + width;
+    }
+    int bottom() const {
+        return y + height;
+    }
+    bool empty() const {
+        return width <= 0 || height <= 0;
+    }
     bool intersects(const Rect& other) const;
     bool operator==(const Rect& other) const;
 };
@@ -20,7 +26,7 @@ struct Rect {
 // widget lands in whichever free gap gets closest to that point, so a preference
 // can never place it underneath a taskbar button.
 Rect find_space(Rect panel, const std::vector<Rect>& occupied, int width, int height, int gap,
-    int position = 100);
+                int position = 100);
 
 struct Allowance {
     std::string label;
@@ -37,26 +43,39 @@ struct AccountUsage {
 };
 
 class Usage {
-public:
-    Usage() { claude.installed = false; }
+  public:
+    Usage() {
+        claude.installed = false;
+    }
     bool live{};
     bool codex_enabled{true}, claude_enabled{true};
-    bool codex_active() const { return codex_enabled && account.installed; }
-    bool claude_active() const { return claude_enabled && claude.installed; }
-    AccountUsage account;
+    bool codex_active() const {
+        return codex_enabled && codex.installed;
+    }
+    bool claude_active() const {
+        return claude_enabled && claude.installed;
+    }
+    AccountUsage codex;
     AccountUsage claude;
-    int session() const { return session_; }
-    int weekly() const { return weekly_; }
+    int session() const {
+        return session_;
+    }
+    int weekly() const {
+        return weekly_;
+    }
     void set_session(int value);
     void set_weekly(int value);
-private:
+
+  private:
     int session_{62};
     int weekly_{81};
 };
 
 struct Color {
     std::uint8_t r, g, b;
-    bool operator==(Color other) const { return r == other.r && g == other.g && b == other.b; }
+    bool operator==(Color other) const {
+        return r == other.r && g == other.g && b == other.b;
+    }
 };
 inline constexpr Color accent{90, 218, 184};
 Color bar_color(int value);

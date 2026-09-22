@@ -12,7 +12,8 @@ bool capture_widget(Rect bounds, const std::filesystem::path& path) {
     HDC memory = CreateCompatibleDC(screen);
     HBITMAP bitmap = CreateCompatibleBitmap(screen, bounds.width, bounds.height);
     auto old = SelectObject(memory, bitmap);
-    const bool copied = BitBlt(memory,0,0,bounds.width,bounds.height,screen,bounds.x,bounds.y,SRCCOPY | CAPTUREBLT) != FALSE;
+    const bool copied = BitBlt(memory, 0, 0, bounds.width, bounds.height, screen, bounds.x, bounds.y,
+                               SRCCOPY | CAPTUREBLT) != FALSE;
     SelectObject(memory, old);
     BITMAPINFO info{};
     info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -21,11 +22,14 @@ bool capture_widget(Rect bounds, const std::filesystem::path& path) {
     info.bmiHeader.biPlanes = 1;
     info.bmiHeader.biBitCount = 32;
     std::vector<unsigned char> pixels(static_cast<std::size_t>(bounds.width) * bounds.height * 4);
-    const bool read = GetDIBits(memory,bitmap,0,static_cast<UINT>(bounds.height),pixels.data(),&info,DIB_RGB_COLORS) != 0;
+    const bool read = GetDIBits(memory, bitmap, 0, static_cast<UINT>(bounds.height), pixels.data(), &info,
+                                DIB_RGB_COLORS) != 0;
     unsigned accent_pixels = 0;
     for (std::size_t i = 0; read && i < pixels.size(); i += 4) {
-        if (std::abs(static_cast<int>(pixels[i+2])-accent.r)<12 &&
-            std::abs(static_cast<int>(pixels[i+1])-accent.g)<12 && std::abs(static_cast<int>(pixels[i])-accent.b)<12) ++accent_pixels;
+        if (std::abs(static_cast<int>(pixels[i + 2]) - accent.r) < 12 &&
+            std::abs(static_cast<int>(pixels[i + 1]) - accent.g) < 12 &&
+            std::abs(static_cast<int>(pixels[i]) - accent.b) < 12)
+            ++accent_pixels;
     }
     const bool visible = copied && accent_pixels > 20;
     bool saved = false;
@@ -48,263 +52,334 @@ bool capture_widget(Rect bounds, const std::filesystem::path& path) {
 } // namespace
 
 void App::finish_live_test() {
-    live_test_=false;
-    KillTimer(controller_,1);
-    const bool codex_ok=!usage_.account.installed || (usage_.account.updated && usage_.account.error.empty());
-    const bool claude_ok=!usage_.claude.installed || (usage_.claude.updated && usage_.claude.error.empty());
-    const bool connected=usage_.live && codex_ok && claude_ok && (usage_.account.installed || usage_.claude.installed);
-    const bool embedded=widget_ && IsWindowVisible(widget_) && !widget_bounds_.empty();
+    live_test_ = false;
+    KillTimer(controller_, 1);
+    const bool codex_ok = !usage_.codex.installed || (usage_.codex.updated && usage_.codex.error.empty());
+    const bool claude_ok = !usage_.claude.installed || (usage_.claude.updated && usage_.claude.error.empty());
+    const bool connected =
+        usage_.live && codex_ok && claude_ok && (usage_.codex.installed || usage_.claude.installed);
+    const bool embedded = widget_ && IsWindowVisible(widget_) && !widget_bounds_.empty();
     if (embedded) {
-        UpdateWindow(widget_); DwmFlush();
-        capture_widget(widget_bounds_,executable_directory()/L"codex-widget.bmp");
-        hovered_=true; show_hover(); UpdateWindow(hover_); DwmFlush();
-        if (IsWindowVisible(hover_)) capture_widget(window_rect(hover_),executable_directory()/L"codex-hover.bmp");
+        UpdateWindow(widget_);
+        DwmFlush();
+        capture_widget(widget_bounds_, executable_directory() / L"codex-widget.bmp");
+        hovered_ = true;
+        show_hover();
+        UpdateWindow(hover_);
+        DwmFlush();
+        if (IsWindowVisible(hover_))
+            capture_widget(window_rect(hover_), executable_directory() / L"codex-hover.bmp");
     }
-    open_details(); UpdateWindow(popup_); DwmFlush();
-    capture_widget(window_rect(popup_),executable_directory()/L"codex-details.bmp");
-    std::ofstream report(executable_directory()/L"codex-live-test.txt");
+    open_details();
+    UpdateWindow(popup_);
+    DwmFlush();
+    capture_widget(window_rect(popup_), executable_directory() / L"codex-details.bmp");
+    std::ofstream report(executable_directory() / L"codex-live-test.txt");
     report << std::boolalpha << "Connected: " << connected << "\nEmbedded: " << embedded << '\n';
-    for (const auto& window : usage_.account.windows) report << window.label << ": " << window.remaining << "% remaining; reset " << window.resets_at << '\n';
-    report << "Codex detected: " << usage_.account.installed << "\nClaude detected: " << usage_.claude.installed << '\n';
-    for (const auto& window : usage_.claude.windows) report << "Claude " << window.label << ": " << window.remaining << "% remaining; reset " << window.resets_at << '\n';
-    if (!usage_.claude.error.empty()) report << "Claude error: " << usage_.claude.error << '\n';
-    if (!usage_.account.error.empty()) report << "Error: " << usage_.account.error << '\n';
+    for (const auto& window : usage_.codex.windows)
+        report << window.label << ": " << window.remaining << "% remaining; reset " << window.resets_at
+               << '\n';
+    report << "Codex detected: " << usage_.codex.installed << "\nClaude detected: " << usage_.claude.installed
+           << '\n';
+    for (const auto& window : usage_.claude.windows)
+        report << "Claude " << window.label << ": " << window.remaining << "% remaining; reset "
+               << window.resets_at << '\n';
+    if (!usage_.claude.error.empty())
+        report << "Claude error: " << usage_.claude.error << '\n';
+    if (!usage_.codex.error.empty())
+        report << "Error: " << usage_.codex.error << '\n';
     PostQuitMessage(connected && embedded && report.good() ? 0 : 1);
 }
 
 void App::finish_smoke_test() {
     smoke_ = false;
-    KillTimer(controller_,1);
+    KillTimer(controller_, 1);
     const bool embedded = widget_ && !widget_bounds_.empty() && IsWindowVisible(widget_) &&
-        GetParent(widget_) == FindWindowW(L"Shell_TrayWnd",nullptr) && window_rect(widget_) == widget_bounds_;
-    bool popup = false, sliders = false, visible = false, closed = false, recreated = false, hit_area = false, keyboard = false, idle = false;
+                          GetParent(widget_) == FindWindowW(L"Shell_TrayWnd", nullptr) &&
+                          window_rect(widget_) == widget_bounds_;
+    bool popup = false, sliders = false, visible = false, closed = false, recreated = false, hit_area = false,
+         keyboard = false, idle = false;
     bool hover_shown = false, hover_left = false, hover_click = false;
     bool settings_saved = false, settings_cancelled = false, settings_centered = false;
     if (embedded) {
         reset_widget();
         tick();
-        recreated = widget_ && IsWindowVisible(widget_) && GetParent(widget_) == FindWindowW(L"Shell_TrayWnd",nullptr);
+        recreated = widget_ && IsWindowVisible(widget_) &&
+                    GetParent(widget_) == FindWindowW(L"Shell_TrayWnd", nullptr);
         UpdateWindow(widget_);
         DwmFlush();
         hit_area = recreated;
         // Test OS hit detection, not just direct messages that bypass transparency.
-        for (const POINT point : {POINT{2,2},POINT{100,16},POINT{28,23},POINT{205,35}}) {
-            const POINT screen{widget_bounds_.x + MulDiv(point.x,widget_bounds_.width,widget_width),
-                widget_bounds_.y + MulDiv(point.y,widget_bounds_.height,widget_height)};
+        for (const POINT point : {POINT{2, 2}, POINT{100, 16}, POINT{28, 23}, POINT{205, 35}}) {
+            const POINT screen{widget_bounds_.x + MulDiv(point.x, widget_bounds_.width, widget_width),
+                               widget_bounds_.y + MulDiv(point.y, widget_bounds_.height, widget_height)};
             hit_area = hit_area && WindowFromPoint(screen) == widget_;
         }
         // Exercise the same click handler and slider notification used interactively.
         const auto foreground = GetForegroundWindow();
-        SendMessageW(widget_,WM_MOUSEMOVE,0,MAKELPARAM(2,2));
-        SendMessageW(widget_,WM_MOUSEHOVER,0,MAKELPARAM(2,2));
+        SendMessageW(widget_, WM_MOUSEMOVE, 0, MAKELPARAM(2, 2));
+        SendMessageW(widget_, WM_MOUSEHOVER, 0, MAKELPARAM(2, 2));
         hover_shown = IsWindowVisible(hover_) && GetForegroundWindow() == foreground;
         if (hover_shown) {
-            UpdateWindow(hover_); DwmFlush();
-            capture_widget(window_rect(hover_),executable_directory() / L"hover-live.bmp");
+            UpdateWindow(hover_);
+            DwmFlush();
+            capture_widget(window_rect(hover_), executable_directory() / L"hover-live.bmp");
         }
-        SendMessageW(widget_,WM_MOUSELEAVE,0,0);
+        SendMessageW(widget_, WM_MOUSELEAVE, 0, 0);
         hover_left = !IsWindowVisible(hover_);
-        SendMessageW(widget_,WM_MOUSEMOVE,0,MAKELPARAM(2,2));
-        SendMessageW(widget_,WM_MOUSEHOVER,0,MAKELPARAM(2,2));
-        SendMessageW(widget_,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(2,2));
-        SendMessageW(widget_,WM_LBUTTONUP,0,MAKELPARAM(2,2));
+        SendMessageW(widget_, WM_MOUSEMOVE, 0, MAKELPARAM(2, 2));
+        SendMessageW(widget_, WM_MOUSEHOVER, 0, MAKELPARAM(2, 2));
+        SendMessageW(widget_, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(2, 2));
+        SendMessageW(widget_, WM_LBUTTONUP, 0, MAKELPARAM(2, 2));
         hover_click = !IsWindowVisible(hover_);
         popup = popup_ && IsWindowVisible(popup_);
         if (popup) {
             UpdateWindow(popup_);
             DwmFlush();
-            capture_widget(window_rect(popup_),executable_directory() / L"details-live.bmp");
+            capture_widget(window_rect(popup_), executable_directory() / L"details-live.bmp");
             // Test the real Clay hit regions through native pointer messages.
-            const auto click_slider = [&](const char* name,float fraction) {
+            const auto click_slider = [&](const char* name, float fraction) {
                 const auto rect = details_view_.bounds(name);
                 const auto scale = popup_scale();
-                const auto x = static_cast<int>((rect.x+rect.width*fraction)*scale);
-                const auto y = static_cast<int>((rect.y+rect.height/2)*scale);
-                SendMessageW(popup_,WM_MOUSEMOVE,0,MAKELPARAM(x,y));
-                SendMessageW(popup_,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(x,y));
-                SendMessageW(popup_,WM_LBUTTONUP,0,MAKELPARAM(x,y));
+                const auto x = static_cast<int>((rect.x + rect.width * fraction) * scale);
+                const auto y = static_cast<int>((rect.y + rect.height / 2) * scale);
+                SendMessageW(popup_, WM_MOUSEMOVE, 0, MAKELPARAM(x, y));
+                SendMessageW(popup_, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(x, y));
+                SendMessageW(popup_, WM_LBUTTONUP, 0, MAKELPARAM(x, y));
             };
-            click_slider("SessionSlider",0.15f);
-            click_slider("WeeklySlider",0.30f);
-            sliders = std::abs(usage_.session()-15) <= 1 && std::abs(usage_.weekly()-30) <= 1;
+            click_slider("SessionSlider", 0.15f);
+            click_slider("WeeklySlider", 0.30f);
+            sliders = std::abs(usage_.session() - 15) <= 1 && std::abs(usage_.weekly() - 30) <= 1;
             const int weekly_before = usage_.weekly();
-            SendMessageW(popup_,WM_KEYDOWN,VK_RIGHT,0);
-            keyboard = usage_.weekly() == weekly_before+1;
-            click_slider("SessionSlider",0.62f);
-            click_slider("WeeklySlider",0.81f);
+            SendMessageW(popup_, WM_KEYDOWN, VK_RIGHT, 0);
+            keyboard = usage_.weekly() == weekly_before + 1;
+            click_slider("SessionSlider", 0.62f);
+            click_slider("WeeklySlider", 0.81f);
             const auto close = details_view_.bounds("Close");
-            const int cx = static_cast<int>((close.x+close.width/2)*popup_scale());
-            const int cy = static_cast<int>((close.y+close.height/2)*popup_scale());
-            SendMessageW(popup_,WM_MOUSEMOVE,0,MAKELPARAM(cx,cy));
-            SendMessageW(popup_,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(cx,cy));
-            SendMessageW(popup_,WM_LBUTTONUP,0,MAKELPARAM(cx,cy));
+            const int cx = static_cast<int>((close.x + close.width / 2) * popup_scale());
+            const int cy = static_cast<int>((close.y + close.height / 2) * popup_scale());
+            SendMessageW(popup_, WM_MOUSEMOVE, 0, MAKELPARAM(cx, cy));
+            SendMessageW(popup_, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(cx, cy));
+            SendMessageW(popup_, WM_LBUTTONUP, 0, MAKELPARAM(cx, cy));
             closed = !IsWindowVisible(popup_);
         }
         UpdateWindow(widget_);
         DwmFlush();
         const unsigned before = widget_frames_ + details_frames_;
-        tick(); UpdateWindow(widget_);
+        tick();
+        UpdateWindow(widget_);
         idle = widget_frames_ + details_frames_ == before;
-        visible = capture_widget(widget_bounds_,executable_directory() / L"widget-live.bmp");
+        visible = capture_widget(widget_bounds_, executable_directory() / L"widget-live.bmp");
     }
     open_details(true);
     if (IsWindowVisible(popup_)) {
         const auto bounds = window_rect(popup_);
         MONITORINFO monitor{sizeof(monitor)};
-        GetMonitorInfoW(MonitorFromWindow(popup_,MONITOR_DEFAULTTONEAREST),&monitor);
-        settings_centered = std::abs(bounds.x*2+bounds.width-monitor.rcWork.left-monitor.rcWork.right) <= 1 &&
-            std::abs(bounds.y*2+bounds.height-monitor.rcWork.top-monitor.rcWork.bottom) <= 1;
-        UpdateWindow(popup_); DwmFlush();
-        capture_widget(bounds,executable_directory() / L"settings-live.bmp");
-        SendMessageW(popup_,WM_KEYDOWN,VK_TAB,0);
-        SendMessageW(popup_,WM_KEYDOWN,VK_END,0);
-        SendMessageW(popup_,WM_KEYDOWN,VK_HOME,0);
-        for (int i=0; i<5; ++i) SendMessageW(popup_,WM_KEYDOWN,VK_RIGHT,0);
-        SendMessageW(popup_,WM_KEYDOWN,VK_TAB,0);
-        SendMessageW(popup_,WM_KEYDOWN,VK_TAB,0);
-        SendMessageW(popup_,WM_KEYDOWN,VK_RETURN,0);
-        settings_saved = !IsWindowVisible(popup_) && preferences_.appearance.text_percent == 150 &&
-            GetPrivateProfileIntW(L"Appearance",L"TextPercent",0,settings_path_.c_str()) == 150;
+        GetMonitorInfoW(MonitorFromWindow(popup_, MONITOR_DEFAULTTONEAREST), &monitor);
+        settings_centered =
+            std::abs(bounds.x * 2 + bounds.width - monitor.rcWork.left - monitor.rcWork.right) <= 1 &&
+            std::abs(bounds.y * 2 + bounds.height - monitor.rcWork.top - monitor.rcWork.bottom) <= 1;
+        UpdateWindow(popup_);
+        DwmFlush();
+        capture_widget(bounds, executable_directory() / L"settings-live.bmp");
+        SendMessageW(popup_, WM_KEYDOWN, VK_TAB, 0);
+        SendMessageW(popup_, WM_KEYDOWN, VK_END, 0);
+        SendMessageW(popup_, WM_KEYDOWN, VK_HOME, 0);
+        for (int i = 0; i < 5; ++i)
+            SendMessageW(popup_, WM_KEYDOWN, VK_RIGHT, 0);
+        SendMessageW(popup_, WM_KEYDOWN, VK_TAB, 0);
+        SendMessageW(popup_, WM_KEYDOWN, VK_TAB, 0);
+        SendMessageW(popup_, WM_KEYDOWN, VK_RETURN, 0);
+        settings_saved =
+            !IsWindowVisible(popup_) && preferences_.appearance.text_percent == 150 &&
+            GetPrivateProfileIntW(L"Appearance", L"TextPercent", 0, settings_path_.c_str()) == 150;
         open_details(true);
-        SendMessageW(popup_,WM_KEYDOWN,VK_TAB,0);
-        SendMessageW(popup_,WM_KEYDOWN,VK_HOME,0);
-        SendMessageW(popup_,WM_KEYDOWN,VK_ESCAPE,0);
+        SendMessageW(popup_, WM_KEYDOWN, VK_TAB, 0);
+        SendMessageW(popup_, WM_KEYDOWN, VK_HOME, 0);
+        SendMessageW(popup_, WM_KEYDOWN, VK_ESCAPE, 0);
         open_details(true);
-        settings_cancelled = preferences_.appearance.text_percent == 150 && details_view_.text_percent() == 150;
+        settings_cancelled =
+            preferences_.appearance.text_percent == 150 && details_view_.text_percent() == 150;
         close_details();
     }
     // Exercise the normal unified panel with deterministic provider data.
     usage_.live = true;
-    usage_.account.windows = {{"5 hour",62,0},{"Weekly",81,0}};
-    usage_.account.plan = "Demo plan";
-    usage_.account.executable_path = "C:/Demo/Codex/codex.exe";
-    usage_.account.updated = std::time(nullptr);
+    usage_.codex.windows = {{"5 hour", 62, 0}, {"Weekly", 81, 0}};
+    usage_.codex.plan = "Demo plan";
+    usage_.codex.executable_path = "C:/Demo/Codex/codex.exe";
+    usage_.codex.updated = std::time(nullptr);
     usage_.claude.installed = true;
-    usage_.claude.windows = {{"5 hour",97,0},{"Weekly",44,0},{"Fable weekly",23,0}};
+    usage_.claude.windows = {{"5 hour", 97, 0}, {"Weekly", 44, 0}, {"Fable weekly", 23, 0}};
     usage_.claude.executable_path = "C:/Demo/Claude/claude.exe";
     usage_.claude.updated = std::time(nullptr);
     open_details();
     const bool unified = settings_mode_ && details_view_.bounds("TextSizeSlider").width > 0 &&
-        details_view_.bounds("LiveUsageCodex").width > 0 && details_view_.bounds("LiveUsageClaude").width > 0 &&
-        details_view_.bounds("RefreshUsage").height > 0;
-    SendMessageW(popup_,WM_KEYDOWN,VK_TAB,0);
-    SendMessageW(popup_,WM_KEYDOWN,VK_HOME,0);
+                         details_view_.bounds("LiveUsageCodex").width > 0 &&
+                         details_view_.bounds("LiveUsageClaude").width > 0 &&
+                         details_view_.bounds("RefreshUsage").height > 0;
+    SendMessageW(popup_, WM_KEYDOWN, VK_TAB, 0);
+    SendMessageW(popup_, WM_KEYDOWN, VK_HOME, 0);
     open_details(true);
-    const bool unified_edits = details_view_.text_percent() == 100 && preferences_.appearance.text_percent == 100 && widget_view_.text_percent() == 100 && hover_view_.text_percent() == 100;
-    UpdateWindow(popup_); DwmFlush();
-    capture_widget(window_rect(popup_),executable_directory() / L"unified-settings.bmp");
+    const bool unified_edits = details_view_.text_percent() == 100 &&
+                               preferences_.appearance.text_percent == 100 &&
+                               widget_view_.text_percent() == 100 && hover_view_.text_percent() == 100;
+    UpdateWindow(popup_);
+    DwmFlush();
+    capture_widget(window_rect(popup_), executable_directory() / L"unified-settings.bmp");
     close_details();
     open_details();
-    const bool unified_cancel = details_view_.text_percent() == 150 && preferences_.appearance.text_percent == 150 && widget_view_.text_percent() == 150 && hover_view_.text_percent() == 150;
+    const bool unified_cancel = details_view_.text_percent() == 150 &&
+                                preferences_.appearance.text_percent == 150 &&
+                                widget_view_.text_percent() == 150 && hover_view_.text_percent() == 150;
     close_details();
     const auto foreground = GetForegroundWindow();
     hovered_ = true;
     show_hover();
-    BYTE opacity{}; DWORD layered_flags{};
+    BYTE opacity{};
+    DWORD layered_flags{};
     const bool compact_hover = IsWindowVisible(hover_) && GetForegroundWindow() == foreground &&
-        hover_view_.bounds("HoverCodex").width > 0 && hover_view_.bounds("HoverClaude").width > 0 &&
-        GetLayeredWindowAttributes(hover_,nullptr,&opacity,&layered_flags) && opacity == 242 && (layered_flags & LWA_ALPHA);
-    UpdateWindow(hover_); DwmFlush();
-    capture_widget(window_rect(hover_),executable_directory() / L"combined-hover.bmp");
+                               hover_view_.bounds("HoverCodex").width > 0 &&
+                               hover_view_.bounds("HoverClaude").width > 0 &&
+                               GetLayeredWindowAttributes(hover_, nullptr, &opacity, &layered_flags) &&
+                               opacity == 242 && (layered_flags & LWA_ALPHA);
+    UpdateWindow(hover_);
+    DwmFlush();
+    capture_widget(window_rect(hover_), executable_directory() / L"combined-hover.bmp");
     hide_hover();
     open_details();
     const auto click_setting = [&](const char* name) {
         const auto bounds = details_view_.bounds(name);
-        const auto point = MAKELPARAM(static_cast<int>((bounds.x+bounds.width/2)*popup_scale()),static_cast<int>((bounds.y+bounds.height/2)*popup_scale()));
-        SendMessageW(popup_,WM_MOUSEMOVE,0,point);
-        SendMessageW(popup_,WM_LBUTTONDOWN,MK_LBUTTON,point);
-        SendMessageW(popup_,WM_LBUTTONUP,0,point);
+        const auto point = MAKELPARAM(static_cast<int>((bounds.x + bounds.width / 2) * popup_scale()),
+                                      static_cast<int>((bounds.y + bounds.height / 2) * popup_scale()));
+        SendMessageW(popup_, WM_MOUSEMOVE, 0, point);
+        SendMessageW(popup_, WM_LBUTTONDOWN, MK_LBUTTON, point);
+        SendMessageW(popup_, WM_LBUTTONUP, 0, point);
     };
     click_setting("FontChoice");
-    UpdateWindow(popup_); DwmFlush();
-    capture_widget(window_rect(popup_),executable_directory() / L"font-dropdown.bmp");
-    SendMessageW(popup_,WM_KEYDOWN,VK_DOWN,0);
-    SendMessageW(popup_,WM_KEYDOWN,VK_RETURN,0);
-    const bool font_preview = preferences_.appearance.font==1 && widget_view_.preferences().appearance.font==1;
+    UpdateWindow(popup_);
+    DwmFlush();
+    capture_widget(window_rect(popup_), executable_directory() / L"font-dropdown.bmp");
+    SendMessageW(popup_, WM_KEYDOWN, VK_DOWN, 0);
+    SendMessageW(popup_, WM_KEYDOWN, VK_RETURN, 0);
+    const bool font_preview =
+        preferences_.appearance.font == 1 && widget_view_.preferences().appearance.font == 1;
     click_setting("ThemeChoice");
-    UpdateWindow(popup_); DwmFlush();
-    capture_widget(window_rect(popup_),executable_directory() / L"theme-dropdown.bmp");
-    SendMessageW(popup_,WM_KEYDOWN,VK_END,0);
-    SendMessageW(popup_,WM_KEYDOWN,VK_RETURN,0);
-    const bool theme_preview=preferences_.appearance.theme==1 && hover_view_.preferences().appearance.theme==1;
+    UpdateWindow(popup_);
+    DwmFlush();
+    capture_widget(window_rect(popup_), executable_directory() / L"theme-dropdown.bmp");
+    SendMessageW(popup_, WM_KEYDOWN, VK_END, 0);
+    SendMessageW(popup_, WM_KEYDOWN, VK_RETURN, 0);
+    const bool theme_preview =
+        preferences_.appearance.theme == 1 && hover_view_.preferences().appearance.theme == 1;
 
     click_setting("CodexInterval");
-    UpdateWindow(popup_); DwmFlush();
-    capture_widget(window_rect(popup_),executable_directory() / L"interval-dropdown.bmp");
-    SendMessageW(popup_,WM_KEYDOWN,VK_END,0);
-    SendMessageW(popup_,WM_KEYDOWN,VK_RETURN,0);
-    const bool interval_preview = preferences_.codex_interval==900 && preferences_.claude_interval==60;
+    UpdateWindow(popup_);
+    DwmFlush();
+    capture_widget(window_rect(popup_), executable_directory() / L"interval-dropdown.bmp");
+    SendMessageW(popup_, WM_KEYDOWN, VK_END, 0);
+    SendMessageW(popup_, WM_KEYDOWN, VK_RETURN, 0);
+    const bool interval_preview = preferences_.codex_interval == 900 && preferences_.claude_interval == 60;
     click_setting("ResetAppearance");
-    const bool appearance_reset = preferences_.appearance==Appearance{} && preferences_.codex_interval==900;
-    UpdateWindow(popup_); DwmFlush();
-    capture_widget(window_rect(popup_),executable_directory() / L"settings-default.bmp");
+    const bool appearance_reset =
+        preferences_.appearance == Appearance{} && preferences_.codex_interval == 900;
+    UpdateWindow(popup_);
+    DwmFlush();
+    capture_widget(window_rect(popup_), executable_directory() / L"settings-default.bmp");
     click_setting("EnableCodex");
-    if (widget_) UpdateWindow(widget_);
-    const bool provider_preview = !usage_.codex_enabled && usage_.claude_enabled &&
-        widget_view_.bounds("ClaudeGeneral").width > 0 && widget_view_.bounds("ClaudeFable").width > 0 &&
-        GetPrivateProfileIntW(L"Providers",L"Codex",0,settings_path_.c_str()) == 1;
+    if (widget_)
+        UpdateWindow(widget_);
+    const bool provider_preview =
+        !usage_.codex_enabled && usage_.claude_enabled && widget_view_.bounds("ClaudeGeneral").width > 0 &&
+        widget_view_.bounds("ClaudeFable").width > 0 &&
+        GetPrivateProfileIntW(L"Providers", L"Codex", 0, settings_path_.c_str()) == 1;
     const auto preview_foreground = GetForegroundWindow();
     hovered_ = true;
     show_hover();
-    const bool hover_preview = IsWindowVisible(hover_) && IsWindowVisible(popup_) && GetForegroundWindow() == preview_foreground;
+    const bool hover_preview =
+        IsWindowVisible(hover_) && IsWindowVisible(popup_) && GetForegroundWindow() == preview_foreground;
     hide_hover();
     click_setting("SaveSettings");
-    const bool providers_saved = !usage_.codex_enabled && usage_.claude_enabled &&
-        GetPrivateProfileIntW(L"Providers",L"Codex",1,settings_path_.c_str()) == 0 &&
-        GetPrivateProfileIntW(L"Providers",L"Claude",0,settings_path_.c_str()) == 1 &&
-        GetPrivateProfileIntW(L"Providers",L"CodexInterval",0,settings_path_.c_str()) == 900 &&
-        GetPrivateProfileIntW(L"Appearance",L"HoverOpacity",0,settings_path_.c_str()) == 95;
+    const bool providers_saved =
+        !usage_.codex_enabled && usage_.claude_enabled &&
+        GetPrivateProfileIntW(L"Providers", L"Codex", 1, settings_path_.c_str()) == 0 &&
+        GetPrivateProfileIntW(L"Providers", L"Claude", 0, settings_path_.c_str()) == 1 &&
+        GetPrivateProfileIntW(L"Providers", L"CodexInterval", 0, settings_path_.c_str()) == 900 &&
+        GetPrivateProfileIntW(L"Appearance", L"HoverOpacity", 0, settings_path_.c_str()) == 95;
     open_details();
     click_setting("EnableClaude");
     const bool all_disabled_preview = !usage_.codex_enabled && !usage_.claude_enabled;
-    SendMessageW(popup_,WM_KEYDOWN,VK_ESCAPE,0);
+    SendMessageW(popup_, WM_KEYDOWN, VK_ESCAPE, 0);
     open_details();
-    const bool retained_detection = details_view_.bounds("EnableCodex").width > 0 && !usage_.codex_enabled && usage_.account.installed;
+    const bool retained_detection =
+        details_view_.bounds("EnableCodex").width > 0 && !usage_.codex_enabled && usage_.codex.installed;
     click_setting("FontChoice");
-    SendMessageW(popup_,WM_KEYDOWN,VK_DOWN,0);
-    SendMessageW(popup_,WM_KEYDOWN,VK_RETURN,0);
+    SendMessageW(popup_, WM_KEYDOWN, VK_DOWN, 0);
+    SendMessageW(popup_, WM_KEYDOWN, VK_RETURN, 0);
     click_setting("ClaudeInterval");
-    SendMessageW(popup_,WM_KEYDOWN,VK_END,0);
-    SendMessageW(popup_,WM_KEYDOWN,VK_RETURN,0);
-    SendMessageW(popup_,WM_CLOSE,0,0);
+    SendMessageW(popup_, WM_KEYDOWN, VK_END, 0);
+    SendMessageW(popup_, WM_KEYDOWN, VK_RETURN, 0);
+    SendMessageW(popup_, WM_CLOSE, 0, 0);
     open_details();
-    const bool full_cancel = preferences_.appearance==Appearance{} && preferences_.claude_interval==60 && preferences_.codex_interval==900;
-    const bool providers_cancelled = !details_view_.codex_enabled() && details_view_.claude_enabled() && !usage_.codex_enabled && usage_.claude_enabled;
+    const bool full_cancel = preferences_.appearance == Appearance{} && preferences_.claude_interval == 60 &&
+                             preferences_.codex_interval == 900;
+    const bool providers_cancelled = !details_view_.codex_enabled() && details_view_.claude_enabled() &&
+                                     !usage_.codex_enabled && usage_.claude_enabled;
     close_details();
     usage_.claude.windows[1].resets_at = 1790583271;
     usage_.claude.windows[2].resets_at = 1790669671;
     tick();
-    if (widget_) { InvalidateRect(widget_,nullptr,FALSE); UpdateWindow(widget_); DwmFlush(); }
-    const bool claude_split = widget_view_.bounds("ClaudeGeneral").width > 0 && widget_view_.bounds("ClaudeFable").width > 0;
-    capture_widget(widget_bounds_,executable_directory() / L"claude-only-taskbar.bmp");
+    if (widget_) {
+        InvalidateRect(widget_, nullptr, FALSE);
+        UpdateWindow(widget_);
+        DwmFlush();
+    }
+    const bool claude_split =
+        widget_view_.bounds("ClaudeGeneral").width > 0 && widget_view_.bounds("ClaudeFable").width > 0;
+    capture_widget(widget_bounds_, executable_directory() / L"claude-only-taskbar.bmp");
     open_details();
     click_setting("WidgetWidth");
-    SendMessageW(popup_,WM_KEYDOWN,VK_HOME,0);
+    SendMessageW(popup_, WM_KEYDOWN, VK_HOME, 0);
     click_setting("HoverWidth");
-    SendMessageW(popup_,WM_KEYDOWN,VK_HOME,0);
-    if (widget_) UpdateWindow(widget_);
-    hovered_=true; show_hover(); UpdateWindow(hover_); DwmFlush();
-    const bool smaller_widths=preferences_.appearance.widget_width==100 && preferences_.appearance.hover_width==240 &&
-        widget_bounds_.width==MulDiv(150,GetDpiForWindow(widget_),96) && IsWindowVisible(hover_);
-    capture_widget(widget_bounds_,executable_directory() / L"small-widget.bmp");
-    capture_widget(window_rect(hover_),executable_directory() / L"small-hover.bmp");
+    SendMessageW(popup_, WM_KEYDOWN, VK_HOME, 0);
+    if (widget_)
+        UpdateWindow(widget_);
+    hovered_ = true;
+    show_hover();
+    UpdateWindow(hover_);
+    DwmFlush();
+    const bool smaller_widths =
+        preferences_.appearance.widget_width == 100 && preferences_.appearance.hover_width == 240 &&
+        widget_bounds_.width == MulDiv(150, GetDpiForWindow(widget_), 96) && IsWindowVisible(hover_);
+    capture_widget(widget_bounds_, executable_directory() / L"small-widget.bmp");
+    capture_widget(window_rect(hover_), executable_directory() / L"small-hover.bmp");
     close_details();
     std::ofstream report(executable_directory() / L"smoke-test.txt");
-    report << std::boolalpha << "Embedded: " << embedded << "\nPopup: " << popup << "\nSlider updates: " << sliders
-        << "\nKeyboard: " << keyboard << "\nNo redraw on idle tick: " << idle << "\nClose button: " << closed << "\nChild window recreated: " << recreated
-        << "\nFull rectangular hit area: " << hit_area
-        << "\nSmaller width preview: " << smaller_widths
-        << "\nTheme dropdown preview: " << theme_preview
-        << "\nFont preview: " << font_preview << "\nInterval preview: " << interval_preview << "\nAppearance reset: " << appearance_reset << "\nFull cancel: " << full_cancel << "\nDisabled provider detection retained: " << retained_detection
-        << "\nProvider preview: " << provider_preview << "\nHover during preview: " << hover_preview << "\nAll-disabled preview: " << all_disabled_preview
-        << "\nProvider preferences saved: " << providers_saved << "\nProvider cancel: " << providers_cancelled << "\nClaude split bars: " << claude_split
-        << "\nCompact translucent hover: " << compact_hover
-        << "\nUnified panel: " << unified << "\nUnified edits retained: " << unified_edits << "\nUnified cancel: " << unified_cancel
-        << "\nSettings centered: " << settings_centered << "\nSettings saved: " << settings_saved << "\nSettings cancel: " << settings_cancelled
-        << "\nHover without activation: " << hover_shown << "\nHover dismissed on leave: " << hover_left << "\nHover dismissed on click: " << hover_click
-        << "\nVisible bar pixels: " << visible << "\nBounds: " << widget_bounds_.x << ',' << widget_bounds_.y << ' '
-        << widget_bounds_.width << 'x' << widget_bounds_.height << '\n';
-    const bool passed = embedded && popup && sliders && closed && recreated && hit_area && keyboard && idle && visible && hover_shown && hover_left && hover_click && settings_centered && settings_saved && settings_cancelled && unified && unified_edits && unified_cancel && compact_hover && providers_saved && providers_cancelled && claude_split && provider_preview && hover_preview && all_disabled_preview && font_preview && interval_preview && appearance_reset && full_cancel && retained_detection && smaller_widths && theme_preview && report.good();
+    report << std::boolalpha << "Embedded: " << embedded << "\nPopup: " << popup
+           << "\nSlider updates: " << sliders << "\nKeyboard: " << keyboard
+           << "\nNo redraw on idle tick: " << idle << "\nClose button: " << closed
+           << "\nChild window recreated: " << recreated << "\nFull rectangular hit area: " << hit_area
+           << "\nSmaller width preview: " << smaller_widths << "\nTheme dropdown preview: " << theme_preview
+           << "\nFont preview: " << font_preview << "\nInterval preview: " << interval_preview
+           << "\nAppearance reset: " << appearance_reset << "\nFull cancel: " << full_cancel
+           << "\nDisabled provider detection retained: " << retained_detection
+           << "\nProvider preview: " << provider_preview << "\nHover during preview: " << hover_preview
+           << "\nAll-disabled preview: " << all_disabled_preview
+           << "\nProvider preferences saved: " << providers_saved
+           << "\nProvider cancel: " << providers_cancelled << "\nClaude split bars: " << claude_split
+           << "\nCompact translucent hover: " << compact_hover << "\nUnified panel: " << unified
+           << "\nUnified edits retained: " << unified_edits << "\nUnified cancel: " << unified_cancel
+           << "\nSettings centered: " << settings_centered << "\nSettings saved: " << settings_saved
+           << "\nSettings cancel: " << settings_cancelled << "\nHover without activation: " << hover_shown
+           << "\nHover dismissed on leave: " << hover_left << "\nHover dismissed on click: " << hover_click
+           << "\nVisible bar pixels: " << visible << "\nBounds: " << widget_bounds_.x << ','
+           << widget_bounds_.y << ' ' << widget_bounds_.width << 'x' << widget_bounds_.height << '\n';
+    const bool passed = embedded && popup && sliders && closed && recreated && hit_area && keyboard && idle &&
+                        visible && hover_shown && hover_left && hover_click && settings_centered &&
+                        settings_saved && settings_cancelled && unified && unified_edits && unified_cancel &&
+                        compact_hover && providers_saved && providers_cancelled && claude_split &&
+                        provider_preview && hover_preview && all_disabled_preview && font_preview &&
+                        interval_preview && appearance_reset && full_cancel && retained_detection &&
+                        smaller_widths && theme_preview && report.good();
     report.close();
     PostQuitMessage(passed ? 0 : 1);
 }

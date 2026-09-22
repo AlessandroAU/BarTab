@@ -1,21 +1,21 @@
 // Verify that consumers can link the compiled library without implementation macros.
 #include <clay.h>
-#include <clay-widgets/widgets.h>
+#include <clay-widgets.h>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
 
 namespace {
 Clay_Dimensions measure(Clay_StringSlice text, Clay_TextElementConfig* config, void*) {
-    return {static_cast<float>(text.length) * config->fontSize * 0.5f,
-        static_cast<float>(config->fontSize)};
+    return {static_cast<float>(text.length) * config->fontSize * 0.5f, static_cast<float>(config->fontSize)};
 }
-}
+} // namespace
 
 int main() {
     const auto size = Clay_MinMemorySize();
     std::unique_ptr<void, decltype(&std::free)> memory(std::malloc(size), &std::free);
-    if (!memory) return 1;
+    if (!memory)
+        return 1;
     Clay_Initialize(Clay_CreateArenaWithCapacityAndMemory(size, memory.get()), {320, 200}, {});
     Clay_SetMeasureTextFunction(measure, nullptr);
     // The context contains large fixed-size state pools; keep it off the stack.
