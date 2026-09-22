@@ -348,7 +348,7 @@ void App::finish_smoke_test() {
     DwmFlush();
     const bool smaller_widths =
         preferences_.appearance.widget_width == 100 &&
-        widget_bounds_.width == MulDiv(150, GetDpiForWindow(widget_), 96) && IsWindowVisible(hover_);
+        widget_bounds_.width == MulDiv(100, GetDpiForWindow(widget_), 96) && IsWindowVisible(hover_);
     capture_widget(widget_bounds_, executable_directory() / L"small-widget.bmp");
     capture_widget(window_rect(hover_), executable_directory() / L"small-hover.bmp");
     close_details();

@@ -3,6 +3,7 @@
 #include <vector>
 #include <string>
 #include <ctime>
+#include <optional>
 #include "core/preferences.hpp"
 
 namespace usage {
@@ -40,6 +41,10 @@ struct AccountUsage {
     std::string executable_path;
     std::string error;
     std::time_t updated{};
+    std::string credit_balance;
+    bool unlimited_credits{};
+    std::optional<bool> has_credits;
+    std::optional<int> available_resets;
 };
 
 class Usage {

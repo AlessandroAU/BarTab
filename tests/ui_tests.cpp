@@ -32,6 +32,72 @@ bool contains(Clay_RenderCommandArray commands, const std::string& expected) {
 } // namespace
 int main() {
     try {
+        {
+            usage::ui::View split(usage::ui::Surface::Widget, measure, nullptr);
+            usage::Usage account;
+            account.live = true;
+            account.codex.windows = {{"Weekly", 51, 1790583271}, {"5 hour", 76, 1790008040}};
+            split.set_reference_time(1790000000);
+            auto frame = split.frame(account, neutral(), 400, 38);
+            check(contains(frame.commands, "5h") && contains(frame.commands, "Week") &&
+                      contains(frame.commands, "76%") && contains(frame.commands, "51%") &&
+                      contains(frame.commands, "Resets in 2h 14m"), "Codex split labels both reported windows and resets");
+            frame = split.frame(account, neutral(), 150, 38);
+            check(split.bounds("Codex5hTrack").width > 0 && split.bounds("CodexWeeklyTrack").width > 0 &&
+                      !contains(frame.commands, "Resets in 2h 14m"), "Narrow Codex split keeps both bars and omits resets");
+            account.codex.windows.pop_back();
+            frame = split.frame(account, neutral(), 208, 38);
+            check(split.bounds("CodexSplit").width == 0 && split.bounds("CodexTrack").width > 0,
+                  "Weekly-only accounts retain a single Codex bar");
+            for (const float width : {225.f, 300.f, 400.f}) {
+                split.frame(account, neutral(), width, 38);
+                const auto row = split.bounds("CodexOnly");
+                const auto providers = split.bounds("Providers");
+                check(std::abs(row.x - 6.f) < 0.5f &&
+                          std::abs(row.width - (providers.width - 12.f)) < 0.5f,
+                      "Codex-only content fills the widget width inside its padding");
+            }
+            account.codex.plan = "prolite";
+            account.codex.credit_balance = "12.5";
+            account.codex.available_resets = 2;
+            usage::ui::View card(usage::ui::Surface::Hover, measure, nullptr);
+            account.claude_enabled = false;
+            for (const float width : {150.f, 208.f, 300.f, 480.f}) {
+                const auto measured_height = card.hover_height(account, width);
+                card.frame(account, neutral(), width, measured_height);
+                check(std::abs(card.bounds("HoverOverview").width - width) < 0.5f,
+                      "Codex-only hover fills the taskbar widget width");
+            }
+            auto height = card.hover_height(account, 300);
+            frame = card.frame(account, neutral(), 300, height);
+            check(contains(frame.commands, "Plan: prolite") && contains(frame.commands, "Credits: 12.5") &&
+                      contains(frame.commands, "2 earned resets available"), "Hover shows reported account details");
+            account.codex.credit_balance.clear();
+            account.codex.available_resets.reset();
+            frame = card.frame(account, neutral(), 300, height);
+            check(!contains(frame.commands, "Credits: 12.5") && !contains(frame.commands, "0 earned resets available"),
+                  "Hover omits missing account details");
+            usage::Preferences clock_preferences;
+            clock_preferences.appearance.hover_text_percent = 100;
+            clock_preferences.appearance.twelve_hour_time = true;
+            card.set_preferences(clock_preferences);
+            std::tm local{};
+            local.tm_year = 126; local.tm_mon = 8; local.tm_mday = 28;
+            local.tm_hour = 0; local.tm_min = 14; local.tm_isdst = -1;
+            auto midnight = std::mktime(&local);
+            account.codex.windows = {{"Weekly", 51, midnight}};
+            card.set_reference_time(midnight - 2 * 86400);
+            frame = card.frame(account, neutral(), 400, 400);
+            check(contains(frame.commands, "Resets Mon, 12:14 AM"), "12-hour clock formats midnight");
+            account.codex.windows[0].resets_at = midnight + 12 * 3600;
+            frame = card.frame(account, neutral(), 400, 400);
+            check(contains(frame.commands, "Resets Mon, 12:14 PM"), "12-hour clock formats noon");
+            clock_preferences.appearance.twelve_hour_time = false;
+            card.set_preferences(clock_preferences);
+            frame = card.frame(account, neutral(), 400, 400);
+            check(contains(frame.commands, "Resets Mon, 12:14"), "24-hour clock omits AM/PM");
+            std::cout << "PASS: Codex single and split window layouts\n";
+        }
         usage::Usage data;
         usage::ui::View details(usage::ui::Surface::Details, measure, nullptr);
         usage::ui::View widget(usage::ui::Surface::Widget, measure, nullptr);
@@ -45,37 +111,47 @@ int main() {
             const std::vector<usage::Rect> occupied{{0, 0, 650, 48}, {950, 0, 50, 48}};
             for (const int percent : {150, 160, 170, 200, 300}) {
                 appearance.text_percent = percent;
-                const auto placed = usage::ui::place_widget(pair, appearance, panel, occupied, 1.f);
-                check(!placed.bounds.empty(), "Increasing taskbar text never hides a widget that still fits");
-                check(placed.text_percent <= percent && placed.text_percent >= 100,
-                      "Taskbar text uses the largest supported fitting scale");
+                const auto placed = usage::ui::place_widget(appearance, panel, occupied, 1.f);
+                check(!placed.empty(), "Increasing taskbar text never hides a widget that still fits");
+                check(placed.width == appearance.widget_width, "Taskbar text never changes the widget width");
                 for (const auto& block : occupied)
-                    check(!placed.bounds.intersects(block), "Fitted taskbar widget avoids buttons");
+                    check(!placed.intersects(block), "Fitted taskbar widget avoids buttons");
             }
             appearance.text_percent = 180;
             pair.codex.windows = {{"Weekly", 81, 1790583271}};
             pair.claude.windows = {{"Weekly", 44, 1790583271}, {"Fable weekly", 23, 1790583271}};
-            const auto tight = usage::ui::place_widget(pair, appearance, panel, occupied, 1.f);
-            check(tight.text_percent == 180 && tight.spacing_percent < 100,
-                  "Tighter spacing preserves large stacked text before reducing the font");
+            // A 300 px widget meeting a 270 px gap narrows; the view then tightens its
+            // spacing and the bars give way, while the text keeps its size.
+            appearance.widget_width = 300;
+            const std::vector<usage::Rect> tight_occupied{{0, 0, 680, 48}, {950, 0, 50, 48}};
+            const auto tight = usage::ui::place_widget(appearance, panel, tight_occupied, 1.f);
+            check(!tight.empty() && tight.width < 300 && tight.width <= 254 && tight.width >= 240,
+                  "Tight gaps narrow the bars, never the text");
             usage::Preferences fitted;
             fitted.appearance = appearance;
             widget.set_preferences(fitted);
-            widget.set_widget_spacing(tight.spacing_percent);
-            auto compact = widget.frame(pair, neutral(), static_cast<float>(tight.bounds.width), 38);
+            auto compact = widget.frame(pair, neutral(), static_cast<float>(tight.width), 38);
             for (int i = 0; i < compact.commands.length; ++i) {
                 const auto& command = compact.commands.internalArray[i];
-                if (command.commandType == CLAY_RENDER_COMMAND_TYPE_TEXT)
+                if (command.commandType == CLAY_RENDER_COMMAND_TYPE_TEXT) {
                     check(command.boundingBox.x >= 0 && command.boundingBox.y >= 0 &&
-                              command.boundingBox.x + command.boundingBox.width <= tight.bounds.width &&
+                              command.boundingBox.x + command.boundingBox.width <= tight.width &&
                               command.boundingBox.y + command.boundingBox.height <= 38,
                           "Adaptive spacing keeps the larger taskbar text inside the widget");
+                    check(command.renderData.text.fontSize >= 16, "Narrowed widget keeps the requested text size");
+                }
             }
-            widget.set_widget_spacing(100);
+            check(widget.bounds("Codex").y < widget.bounds("Claude").y &&
+                      widget.bounds("Codex").x == widget.bounds("Claude").x,
+                  "Large text stays stacked once padding is gone");
+            const float narrowed_track = widget.bounds("CodexTrack").width;
+            widget.frame(pair, neutral(), 300, 38);
+            check(narrowed_track > 0 && narrowed_track < widget.bounds("CodexTrack").width,
+                  "Narrowed widget shrinks its bars");
             appearance.text_percent = 300;
-            const auto spacious = usage::ui::place_widget(pair, appearance, panel, {}, 1.f);
-            check(spacious.text_percent == 300, "Taskbar restores requested text size when space returns");
-            check(usage::ui::place_widget(pair, appearance, panel, {panel}, 1.f).bounds.empty(),
+            const auto spacious = usage::ui::place_widget(appearance, panel, {}, 1.f);
+            check(spacious.width == appearance.widget_width, "Full width returns when space returns");
+            check(usage::ui::place_widget(appearance, panel, {panel}, 1.f).empty(),
                   "Completely full taskbar still hides widget safely");
         }
         usage::Preferences baseline;
@@ -93,6 +169,18 @@ int main() {
         check(contains(actual.commands, "Codex") && contains(actual.commands, "85%") &&
                   !contains(actual.commands, "62%"),
               "Single primary weekly allowance displayed");
+        {
+            auto single = live;
+            widget.set_reference_time(1790000000);
+            single.codex.windows[0].resets_at = 1790008040;
+            auto reset_frame = widget.frame(single, neutral(), 208, 38);
+            check(contains(reset_frame.commands, "Weekly, Resets in 2h 14m"),
+                  "Codex-only reset line uses the same descriptive wording as the hover card");
+            single.codex.windows[0].resets_at = 0;
+            reset_frame = widget.frame(single, neutral(), 208, 38);
+            check(contains(reset_frame.commands, "Weekly, Reset unavailable"), "Codex-only unknown reset is explicit");
+            widget.set_reference_time(0);
+        }
         live.codex.error = "Connection failed";
         actual = widget.frame(live, neutral(), 208, 38);
         check(contains(actual.commands, "Codex *"), "Failed refresh marks cached data stale");
@@ -132,7 +220,8 @@ int main() {
         resets.codex_enabled = false;
         for (int percent : {100, 150, 300}) {
             widget.set_text_percent(percent);
-            const auto size = usage::ui::widget_size(resets, widget.preferences().appearance);
+            // A widget the user has sized for this text scale.
+            const Clay_Dimensions size{208.f * percent / 100.f, 38.f};
             actual = widget.frame(resets, neutral(), size.width, size.height);
             int reset_labels = 0;
             for (int i = 0; i < actual.commands.length; ++i) {
@@ -152,6 +241,31 @@ int main() {
         }
         widget.set_preferences(baseline);
         resets.codex_enabled = true;
+        {
+            // Combined mode stacks two Claude tracks nearly as thick as a full bar.
+            usage::Preferences combined = baseline;
+            combined.appearance.text_percent = 150;
+            widget.set_preferences(combined);
+            const auto size = usage::ui::widget_size(combined.appearance);
+            widget.frame(resets, neutral(), size.width, size.height);
+            const auto weekly = widget.bounds("ClaudeWeeklyTrack"), fable = widget.bounds("ClaudeFableTrack");
+            const auto row = widget.bounds("Claude");
+            check(weekly.height >= 6 && fable.height == weekly.height,
+                  "Combined Claude tracks are one pixel thinner than the bar");
+            check(fable.y + fable.height <= row.y + row.height + 0.5f && weekly.y >= row.y - 0.5f,
+                  "Combined Claude tracks stay within their row");
+            const auto codex_track = widget.bounds("CodexTrack");
+            check(std::abs(codex_track.x - weekly.x) < 0.5f &&
+                      std::abs(codex_track.x + codex_track.width - (weekly.x + weekly.width)) < 0.5f,
+                  "Combined rows start and end their bars on the same x");
+
+            combined.appearance.text_percent = 100;
+            widget.set_preferences(combined);
+            widget.frame(resets, neutral(), 208, 38);
+            check(widget.bounds("ClaudeWeeklyTrack").height <= 4.5f,
+                  "Small labels cap the combined track thickness");
+            widget.set_preferences(baseline);
+        }
         resets.claude.windows[2].resets_at += 86400;
         actual = widget.frame(resets, neutral(), 208, 38);
         check(contains(actual.commands, "reset 25/09 / 26/09"), "Claude retains different reset dates");
@@ -278,15 +392,22 @@ int main() {
             usage::Preferences sized;
             sized.appearance.text_percent = percent;
             sized.appearance.hover_text_percent = percent;
+            sized.appearance.widget_width = 150;
             widget.set_preferences(sized);
             hover.set_preferences(sized);
             for (const bool codex : {false, true}) {
                 narrow_usage.codex_enabled = codex;
-                const auto size = usage::ui::widget_size(narrow_usage, sized.appearance);
+                // A widget the user has sized generously for this text scale; side-by-side
+                // rows beyond 180% need roughly twice the room of stacked ones.
+                const Clay_Dimensions size{(percent > 180 ? 400.f : 150.f) * percent / 100.f, 38.f};
                 actual = widget.frame(narrow_usage, neutral(), size.width, size.height);
-                if (!codex && percent > 160)
+                // Padding gives way first, so rows stack up to 180% and go side by side beyond.
+                if (!codex && percent > 180)
                     check(widget.bounds("ClaudeGeneral").x < widget.bounds("ClaudeFable").x,
                           "Large taskbar text uses a horizontal layout");
+                if (!codex && percent > 160 && percent <= 180)
+                    check(widget.bounds("ClaudeGeneral").y < widget.bounds("ClaudeFable").y,
+                          "Text up to 180% stays stacked by tightening padding");
                 for (int i = 0; i < actual.commands.length; ++i) {
                     const auto& command = actual.commands.internalArray[i];
                     if (command.commandType == CLAY_RENDER_COMMAND_TYPE_TEXT) {
@@ -366,6 +487,10 @@ int main() {
         actual = details.frame(live, neutral(), 400, 470);
         check(details.bounds("SessionSlider").width == 0, "Live allowance cannot be edited");
         usage::ui::View settings(usage::ui::Surface::Settings, measure, nullptr);
+        check(!settings.animations(), "Views start with animations off for deterministic layout");
+        settings.set_animations(true);
+        check(settings.animations(), "Hosts can enable eased motion");
+        settings.set_animations(false);
         settings.frame(data, neutral(), 400, 470);
         auto settings_input = neutral();
         settings_input.keyTab = true;

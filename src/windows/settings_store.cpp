@@ -18,7 +18,6 @@ constexpr AppearanceField appearance_fields[] = {
     {L"HoverOpacity", "HoverOpacity", &Appearance::hover_opacity},
     {L"HoverDelay", "HoverDelay", &Appearance::hover_delay},
     {L"BarHeight", "BarHeight", &Appearance::bar_height},
-    {L"CornerRadius", "CornerRadius", &Appearance::corner_radius},
     {L"Position", "Position", &Appearance::position}};
 } // namespace
 Preferences read_settings(const std::filesystem::path& path) {
@@ -38,6 +37,7 @@ Preferences read_settings(const std::filesystem::path& path) {
     value.appearance.show_resets = read(L"Appearance", L"ShowResets", value.appearance.show_resets) != 0;
     value.appearance.hover_enabled =
         read(L"Appearance", L"HoverEnabled", value.appearance.hover_enabled) != 0;
+    value.appearance.twelve_hour_time = read(L"Appearance", L"TwelveHourTime", 0) != 0;
     value.codex_enabled = read(L"Providers", L"Codex", value.codex_enabled) != 0;
     value.claude_enabled = read(L"Providers", L"Claude", value.claude_enabled) != 0;
     value.codex_interval = read(L"Providers", L"CodexInterval", value.codex_interval);
@@ -60,6 +60,7 @@ bool write_settings(const std::filesystem::path& path, Preferences value) {
         for (const auto& field : appearance_fields)
             file << field.name << '=' << value.appearance.*(field.member) << '\n';
         file << "ShowResets=" << value.appearance.show_resets
+             << "\nTwelveHourTime=" << value.appearance.twelve_hour_time
              << "\nHoverEnabled=" << value.appearance.hover_enabled
              << "\n[Providers]\nCodex=" << value.codex_enabled << "\nClaude=" << value.claude_enabled
              << "\nCodexInterval=" << value.codex_interval << "\nClaudeInterval=" << value.claude_interval

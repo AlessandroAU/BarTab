@@ -15,7 +15,6 @@ inline constexpr SettingRange widget_width{100, 400, 10};
 inline constexpr SettingRange hover_opacity{50, 100, 1};
 inline constexpr SettingRange hover_delay{50, 1500, 50};
 inline constexpr SettingRange bar_height{3, 9, 1};
-inline constexpr SettingRange corner_radius{0, 12, 1};
 inline constexpr SettingRange position{0, 100, 1};
 inline constexpr SettingRange provider_interval{15, 900, 1};
 } // namespace preference_limits
@@ -23,14 +22,16 @@ inline constexpr SettingRange provider_interval{15, 900, 1};
 struct Appearance {
     // Taskbar and hover card text sizes are independent percentages.
     int text_percent{150}, hover_text_percent{150};
-    int widget_width{150}, hover_opacity{95}, hover_delay{250};
-    int bar_height{7}, corner_radius{10};
+    // The taskbar widget's actual width; text size never changes it.
+    int widget_width{225}, hover_opacity{95}, hover_delay{250};
+    int bar_height{7};
     // Position along the taskbar as a percentage from the left edge.
     int position{100};
     bool show_resets{true}, hover_enabled{true};
+    bool twelve_hour_time{false};
     auto values() const {
         return std::tie(text_percent, hover_text_percent, widget_width, hover_opacity, hover_delay,
-                        bar_height, corner_radius, position, show_resets, hover_enabled);
+                        bar_height, position, show_resets, hover_enabled, twelve_hour_time);
     }
     bool operator==(const Appearance& other) const {
         return values() == other.values();
@@ -42,7 +43,6 @@ struct Appearance {
         hover_opacity = preference_limits::hover_opacity.clamp(hover_opacity);
         hover_delay = preference_limits::hover_delay.clamp(hover_delay);
         bar_height = preference_limits::bar_height.clamp(bar_height);
-        corner_radius = preference_limits::corner_radius.clamp(corner_radius);
         position = preference_limits::position.clamp(position);
     }
 };

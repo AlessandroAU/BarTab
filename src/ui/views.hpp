@@ -8,14 +8,12 @@
 #include <deque>
 
 namespace usage::ui {
-Clay_Dimensions widget_size(const Usage& data, const Appearance& appearance, int spacing_percent = 100);
-struct WidgetPlacement {
-    Rect bounds;
-    int text_percent{};
-    int spacing_percent{100};
-};
-WidgetPlacement place_widget(const Usage& data, const Appearance& appearance, Rect panel,
-                             const std::vector<Rect>& occupied, float scale);
+// The width preference is the widget's width. Text keeps its size and the bars
+// absorb what is left.
+Clay_Dimensions widget_size(const Appearance& appearance);
+// The widget at its preferred width, or narrowed down to the minimum width when a
+// free taskbar gap is tighter; empty when nothing fits.
+Rect place_widget(const Appearance& appearance, Rect panel, const std::vector<Rect>& occupied, float scale);
 Clay_Dimensions hover_size(const Usage& data, int text_percent);
 
 enum class Surface { Widget, Details, Hover, Settings };
@@ -44,7 +42,6 @@ class View {
     }
     void set_text_percent(int value);
     void set_hover_text_percent(int value);
-    void set_widget_spacing(int value) { widget_spacing_ = std::clamp(value, 0, 100); }
     void set_preferences(Preferences value) {
         value.normalize();
         preferences_ = value;
@@ -93,10 +90,22 @@ class View {
     float text_gamma() const {
         return system_light_ ? 1.f / 1.6f : 1.6f;
     }
+    // Eased hover, toggle and scroll motion. Off by default so layouts, tests and
+    // screenshots are deterministic; a host that enables it must keep rendering
+    // frames with a real deltaTime until the motion settles.
+    void set_animations(bool value) {
+        widgets_->animationsEnabled = value;
+    }
+    bool animations() const {
+        return widgets_->animationsEnabled;
+    }
     void invalidate_measurements();
     ClayWidgets_Cursor cursor() const;
 
   private:
+    std::string date(std::int64_t timestamp) const;
+    std::string hover_reset(std::int64_t timestamp, std::int64_t now) const;
+    std::string reset_time(std::int64_t timestamp, bool date_only = false, bool day_key = false) const;
     Surface surface_;
     void* arena_{};
     Clay_Context* clay_{};
@@ -104,7 +113,11 @@ class View {
     std::string session_, weekly_;
     std::string session_used_, weekly_used_;
     std::int64_t reference_time_{};
+    // Padding and gap compression, derived per frame: a widget squeezed below its
+    // preferred width tightens toward zero, and text between 160% and 180% needs
+    // the padding gone before two rows still stack in the taskbar height.
     int widget_spacing_{100};
+    int widget_spacing_for(float width) const;
     uint16_t widget_gap(int normal, int minimum = 0) const;
     int stacked_text_limit() const { return 160 + (100 - widget_spacing_) / 5; }
     bool hovered_{};
@@ -141,7 +154,32 @@ class View {
                     ClayWidgets_Input input);
     void text(const char* value, uint16_t size, Clay_Color tint, int text_percent = 0);
     void compact_bar(const char* id, const char* label, int value, std::string_view percent,
-                     bool aligned = false, float percent_width = 0, int text_percent = 0);
+                     int text_percent = 0);
+    // Space between a taskbar label and its bar, and between the bar and its
+    // percentage and reset date, identical in every taskbar mode. Narrow widgets
+    // tighten it so their bars keep some length; placement compresses it further.
+    uint16_t bar_gap() const {
+        return widget_gap(narrow_widget() ? 3 : 6, 1);
+    }
+    // Little room relative to the text: shorter reset dates and tighter gaps. The
+    // 208 px threshold is for 100% text and scales with it; the width is the one
+    // being laid out, which placement may have narrowed below the preference.
+    float widget_width_{};
+    bool narrow_widget() const {
+        const float width = widget_width_ > 0 ? widget_width_ : preferences_.appearance.widget_width;
+        return width * 100 < 208 * surface_text_percent();
+    }
+    float text_width(const char* value, uint16_t size, int text_percent = 0);
+    // Fixed label and percentage column widths so stacked taskbar rows share one
+    // bar start and end; zero lets each row size its own text.
+    struct WidgetColumns {
+        float label{}, percent{}, reset{};
+    };
+    // Optional fixed-width wrapper so stacked rows keep their columns flush.
+    void column_text(float width, const char* value, uint16_t size, Clay_Color tint, uint16_t left_padding = 0);
+    WidgetColumns widget_columns_;
+    void codex_only_split(const AccountUsage& account, const Allowance& session, const Allowance& weekly);
+    float frame_width_{};
     void claude_only(const AccountUsage& account, const Allowance& weekly, const Allowance& fable);
     void taskbar_allowance(const char* id, const char* name, const Allowance& allowance, bool stale,
                            bool show_reset = true, bool date_only = false);

@@ -41,7 +41,8 @@ int main() {
         check(read_settings({}) == Preferences{}, "Empty load path uses defaults");
         check(!write_settings({}, {}), "Empty save path fails");
         Preferences saved;
-        saved.appearance = {230, 120, 270, 73, 350, 5, 4, 37, false, false};
+        saved.appearance = {230, 120, 270, 73, 350, 5, 37, false, false};
+        saved.appearance.twelve_hour_time = true;
         saved.codex_enabled = false;
         saved.claude_enabled = false;
         saved.codex_interval = 45;

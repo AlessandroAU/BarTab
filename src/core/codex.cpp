@@ -23,6 +23,23 @@ AccountUsage parse_codex_limits(std::string_view source) {
     AccountUsage result;
     if (bucket->contains("planType") && (*bucket)["planType"].is_string())
         result.plan = (*bucket)["planType"].get<std::string>();
+    if (bucket->contains("credits") && (*bucket)["credits"].is_object()) {
+        const auto& credits = (*bucket)["credits"];
+        if (credits.contains("balance") && credits["balance"].is_string())
+            result.credit_balance = credits["balance"].get<std::string>();
+        if (credits.contains("unlimited") && credits["unlimited"].is_boolean())
+            result.unlimited_credits = credits["unlimited"].get<bool>();
+        if (credits.contains("hasCredits") && credits["hasCredits"].is_boolean())
+            result.has_credits = credits["hasCredits"].get<bool>();
+    }
+    if (root.contains("rateLimitResetCredits") && root["rateLimitResetCredits"].is_object()) {
+        const auto& resets = root["rateLimitResetCredits"];
+        if (resets.contains("availableCount") && resets["availableCount"].is_number_integer()) {
+            const auto count = resets["availableCount"].get<std::int64_t>();
+            if (count >= 0 && count <= 2147483647)
+                result.available_resets = static_cast<int>(count);
+        }
+    }
     for (const char* key : {"primary", "secondary"}) {
         if (!bucket->contains(key) || (*bucket)[key].is_null())
             continue;

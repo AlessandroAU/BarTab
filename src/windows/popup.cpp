@@ -1,8 +1,16 @@
 #include "windows/app.hpp"
 #include "windows/window_shape.hpp"
 #include <algorithm>
+#include <chrono>
 
 namespace usage::windows {
+namespace {
+// Longest eased motion in the widget set is the toggle knob at about 0.36 s;
+// the loop outlives it so every transition reaches its target.
+constexpr auto settle_window = std::chrono::milliseconds(500);
+constexpr UINT animation_timer = 3;
+constexpr UINT animation_interval_ms = 16;
+} // namespace
 
 LRESULT CALLBACK App::popup_proc(HWND window, UINT message, WPARAM w, LPARAM l) {
     auto* app = instance(window, message, l);
@@ -10,6 +18,10 @@ LRESULT CALLBACK App::popup_proc(HWND window, UINT message, WPARAM w, LPARAM l) 
         switch (message) {
         case WM_CLOSE:
             app->close_details();
+            return 0;
+        case WM_TIMER:
+            if (w == animation_timer)
+                app->animate_details();
             return 0;
         case WM_ERASEBKGND:
             return 1;
@@ -62,14 +74,43 @@ void App::close_details() {
     details_view_.reset_focus();
     if (GetCapture() == popup_)
         ReleaseCapture();
+    KillTimer(popup_, animation_timer);
     ShowWindow(popup_, SW_HIDE);
     unpin_hover();
     cancel_settings_preview();
 }
 
+// Input or a data change: render now and, when animating, keep frames coming
+// for the settle window so eased motion runs to completion.
 void App::render_details(ClayWidgets_Input input) {
     if (!popup_)
         return;
+    if (details_view_.animations()) {
+        details_settle_until_ = std::chrono::steady_clock::now() + settle_window;
+        SetTimer(popup_, animation_timer, animation_interval_ms, nullptr);
+    }
+    render_details_frame(input);
+}
+
+void App::animate_details() {
+    if (!popup_ || !IsWindowVisible(popup_) || !details_view_.animations() ||
+        std::chrono::steady_clock::now() >= details_settle_until_) {
+        KillTimer(popup_, animation_timer);
+        return;
+    }
+    render_details_frame(details_pointer_);
+}
+
+void App::render_details_frame(ClayWidgets_Input input) {
+    if (!popup_)
+        return;
+    // Elapsed time since the previous frame drives the easing; a long idle gap is
+    // capped so a transition never jumps most of the way on its first frame.
+    const auto now = std::chrono::steady_clock::now();
+    input.deltaTime = details_rendered_ == std::chrono::steady_clock::time_point{}
+                          ? 0.f
+                          : std::min(0.05f, std::chrono::duration<float>(now - details_rendered_).count());
+    details_rendered_ = now;
     RECT rect{};
     GetClientRect(popup_, &rect);
     if (rect.right <= 0 || rect.bottom <= 0)
@@ -108,7 +149,10 @@ void App::render_details(ClayWidgets_Input input) {
         else
             update_usage();
         // Settle the borrowed percentage labels after the slider changes data.
-        frame = details_view_.frame(usage_, details_pointer_, static_cast<float>(rect.right) / scale,
+        // Same instant as the frame above, so no further easing time elapses.
+        auto settle = details_pointer_;
+        settle.deltaTime = 0.f;
+        frame = details_view_.frame(usage_, settle, static_cast<float>(rect.right) / scale,
                                     static_cast<float>(rect.bottom) / scale);
     }
     details_pixels_ = renderer_.render(frame.commands, rect.right, rect.bottom, scale, false);
@@ -235,6 +279,7 @@ void App::open_details(bool settings) {
     }
     if (IsWindowVisible(popup_))
         close_details();
+    details_rendered_ = {};
     settings_mode_ = settings;
     if (settings)
         begin_settings_preview();

@@ -28,7 +28,7 @@ Clay_ElementDeclaration column(uint16_t padding, uint16_t gap) {
     result.layout.childGap = gap;
     return result;
 }
-std::string date(std::int64_t timestamp) {
+std::string format_date(std::int64_t timestamp, bool twelve_hour) {
     if (timestamp <= 0)
         return std::string("Unavailable");
     const auto time = static_cast<std::time_t>(timestamp);
@@ -41,11 +41,11 @@ std::string date(std::int64_t timestamp) {
         return std::string("Unavailable");
 #endif
     char buffer[40]{};
-    std::strftime(buffer, sizeof(buffer), "%d %b %H:%M", &local);
+    std::strftime(buffer, sizeof(buffer), twelve_hour ? "%d %b %I:%M %p" : "%d %b %H:%M", &local);
     return std::string(buffer);
 }
 
-std::string hover_reset(std::int64_t timestamp, std::int64_t now) {
+std::string format_hover_reset(std::int64_t timestamp, std::int64_t now, bool twelve_hour) {
     if (timestamp <= 0)
         return "Reset unavailable";
     const auto seconds = timestamp - now;
@@ -66,7 +66,7 @@ std::string hover_reset(std::int64_t timestamp, std::int64_t now) {
         return "Reset unavailable";
 #endif
     char buffer[40]{};
-    std::strftime(buffer, sizeof(buffer), seconds < 7 * 86400 ? "%a, %H:%M" : "%d %b, %H:%M", &local);
+    std::strftime(buffer, sizeof(buffer), seconds < 7 * 86400 ? (twelve_hour ? "%a, %I:%M %p" : "%a, %H:%M") : (twelve_hour ? "%d %b, %I:%M %p" : "%d %b, %H:%M"), &local);
     return std::string("Resets ") + buffer;
 }
 std::string freshness(std::int64_t updated, std::int64_t now) {
@@ -79,7 +79,7 @@ std::string freshness(std::int64_t updated, std::int64_t now) {
            (minutes < 60 ? "m ago" : minutes < 1440 ? "h ago" : "d ago");
 }
 
-std::string reset_time(std::int64_t timestamp, bool date_only = false, bool day_key = false) {
+std::string format_reset_time(std::int64_t timestamp, bool date_only, bool day_key, bool twelve_hour) {
     if (timestamp <= 0)
         return "?";
     const auto time = static_cast<std::time_t>(timestamp);
@@ -92,11 +92,20 @@ std::string reset_time(std::int64_t timestamp, bool date_only = false, bool day_
         return "?";
 #endif
     char buffer[24]{};
-    std::strftime(buffer, sizeof(buffer), day_key ? "%Y-%m-%d" : date_only ? "%d/%m" : "%d/%m %H:%M", &local);
+    std::strftime(buffer, sizeof(buffer), day_key ? "%Y-%m-%d" : date_only ? "%d/%m" : (twelve_hour ? "%d/%m %I:%M %p" : "%d/%m %H:%M"), &local);
     return buffer;
 }
 
 } // namespace
+std::string View::date(std::int64_t timestamp) const {
+    return format_date(timestamp, preferences_.appearance.twelve_hour_time);
+}
+std::string View::hover_reset(std::int64_t timestamp, std::int64_t now) const {
+    return format_hover_reset(timestamp, now, preferences_.appearance.twelve_hour_time);
+}
+std::string View::reset_time(std::int64_t timestamp, bool date_only, bool day_key) const {
+    return format_reset_time(timestamp, date_only, day_key, preferences_.appearance.twelve_hour_time);
+}
 Clay_Color View::accent_color() const {
     return color(system_accent_);
 }
@@ -223,13 +232,18 @@ void View::settings_panel(const Usage& data, Frame& result, ClayWidgets_Input in
                 result.changed = setting_slider("BarHeight", "Bar thickness", a.bar_height,
                                                 preference_limits::bar_height, " px") ||
                                  result.changed;
-                result.changed = setting_slider("CornerRadius", "Corner radius", a.corner_radius,
-                                                preference_limits::corner_radius, " px") ||
-                                 result.changed;
                 result.changed =
                     ClayWidgets_Checkbox(widgets_.get(), CLAY_ID("ShowResets"),
                                          CLAY_STRING("Show taskbar reset labels"), &a.show_resets) ||
                     result.changed;
+                text("Time format", settings_body, {210, 220, 234, 255});
+                Clay_String time_formats[] = {CLAY_STRING("24-hour"), CLAY_STRING("12-hour (AM/PM)")};
+                int32_t time_format = a.twelve_hour_time ? 1 : 0;
+                if (ClayWidgets_Combo(widgets_.get(), CLAY_ID("TimeFormat"), CLAY_STRING(""),
+                                      time_formats, 2, &time_format)) {
+                    a.twelve_hour_time = time_format == 1;
+                    result.changed = true;
+                }
                 text("Hover card", 19, {236, 243, 250, 255});
                 result.changed = ClayWidgets_Checkbox(widgets_.get(), CLAY_ID("HoverEnabled"),
                                                       CLAY_STRING("Show hover card"), &a.hover_enabled) ||
@@ -260,7 +274,7 @@ void View::settings_panel(const Usage& data, Frame& result, ClayWidgets_Input in
                 usage_heading.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
                 usage_heading.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
                 CLAY_AUTO_ID (usage_heading) {
-                    text("Usage Remaining", 21, {236, 243, 250, 255});
+                    text("Providers", 21, {236, 243, 250, 255});
                     auto spacer = column(0, 0);
                     CLAY_AUTO_ID (spacer) {}
                     result.refresh = ClayWidgets_Button(widgets_.get(), CLAY_ID("RefreshUsage"), CLAY_STRING("Refresh"));
@@ -440,28 +454,30 @@ uint16_t View::widget_gap(int normal, int minimum) const {
     return static_cast<uint16_t>(surface_ == Surface::Widget
         ? std::lround(minimum + (normal - minimum) * widget_spacing_ / 100.f) : normal);
 }
-void View::compact_bar(const char* name, const char* label, int value, std::string_view percent, bool aligned,
-                       float percent_width, int text_percent) {
+float View::text_width(const char* value, uint16_t size, int text_percent) {
+    if (text_percent == 0)
+        text_percent = surface_text_percent();
+    Clay_TextElementConfig config{};
+    config.fontId = 1;
+    config.fontSize = static_cast<uint16_t>(std::lround(size * text_percent / 100.f));
+    const Clay_StringSlice sample{static_cast<int32_t>(std::strlen(value)), value, value};
+    return std::ceil(widgets_->measureText(sample, &config, widgets_->measureTextUserData).width);
+}
+void View::compact_bar(const char* name, const char* label, int value, std::string_view percent,
+                       int text_percent) {
     if (text_percent == 0)
         text_percent = surface_text_percent();
     const uint16_t text_size = surface_ == Surface::Settings ? settings_body : 10;
+    const bool hover = surface_ == Surface::Hover;
+    const float label_width = hover ? 90.f * text_percent / 100.f : widget_columns_.label;
+    const float percent_width = hover ? 28.f * text_percent / 100.f : widget_columns_.percent;
     auto row = column(0, 0);
     row.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
-    row.layout.childGap = widget_gap(aligned ? 3 : 5, 1);
+    row.layout.childGap = bar_gap();
     row.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
     CLAY (id(name), row) {
-        if (surface_ == Surface::Hover || aligned) {
+        if (label_width > 0) {
             auto name_column = column(0, 0);
-            float label_width = 90.f * text_percent / 100.f;
-            if (aligned) {
-                const char* longest = std::strchr(label, '*') ? "General *" : "General";
-                Clay_TextElementConfig config{};
-                config.fontId = 1;
-                config.fontSize = static_cast<uint16_t>(std::lround(text_size * text_percent / 100.f));
-                const Clay_StringSlice sample{static_cast<int32_t>(std::strlen(longest)), longest, longest};
-                label_width =
-                    std::ceil(widgets_->measureText(sample, &config, widgets_->measureTextUserData).width);
-            }
             name_column.layout.sizing.width = CLAY_SIZING_FIXED(label_width);
             CLAY_AUTO_ID (name_column) {
                 text(label, text_size, {172, 190, 210, 255}, text_percent);
@@ -473,7 +489,7 @@ void View::compact_bar(const char* name, const char* label, int value, std::stri
         track.layout.sizing.height =
             CLAY_SIZING_FIXED(static_cast<float>(preferences_.appearance.bar_height));
         track.backgroundColor = widgets_->theme.borderColor;
-        track.cornerRadius = CLAY_CORNER_RADIUS(static_cast<float>(preferences_.appearance.corner_radius));
+        track.cornerRadius = CLAY_CORNER_RADIUS(12);
         CLAY (id(this->label(std::string(name) + "Track")), track) {
             Clay_ElementDeclaration fill{};
             fill.layout.sizing.width = CLAY_SIZING_PERCENT(static_cast<float>(value) / 100.f);
@@ -483,15 +499,14 @@ void View::compact_bar(const char* name, const char* label, int value, std::stri
                 branded      ? provider_color(name, std::strstr(name, "Fable") || std::strstr(label, "Fable"))
                 : value > 30 ? accent_color()
                              : color(bar_color(value));
-            fill.cornerRadius = CLAY_CORNER_RADIUS(static_cast<float>(preferences_.appearance.corner_radius));
+            fill.cornerRadius = CLAY_CORNER_RADIUS(12);
             CLAY_AUTO_ID (fill) {
             }
         }
-        if (surface_ == Surface::Hover || aligned) {
+        if (percent_width > 0) {
             auto value_column = column(0, 0);
-            value_column.layout.sizing.width =
-                CLAY_SIZING_FIXED(aligned ? percent_width : 28.f * text_percent / 100.f);
-            value_column.layout.childAlignment.x = aligned ? CLAY_ALIGN_X_LEFT : CLAY_ALIGN_X_RIGHT;
+            value_column.layout.sizing.width = CLAY_SIZING_FIXED(percent_width);
+            value_column.layout.childAlignment.x = hover ? CLAY_ALIGN_X_RIGHT : CLAY_ALIGN_X_LEFT;
             CLAY_AUTO_ID (value_column) {
                 text(percent.data(), text_size, {236, 243, 250, 255}, text_percent);
             }
@@ -499,19 +514,59 @@ void View::compact_bar(const char* name, const char* label, int value, std::stri
             text(percent.data(), text_size, {236, 243, 250, 255}, text_percent);
     }
 }
+void View::codex_only_split(const AccountUsage& account, const Allowance& session, const Allowance& weekly) {
+    const int percent = std::min(preferences_.appearance.text_percent, 160);
+    const auto previous = widget_columns_;
+    const auto title = account.error.empty() ? "Codex" : "Codex *";
+    const auto first = std::to_string(session.remaining) + "%";
+    const auto second = std::to_string(weekly.remaining) + "%";
+    widget_columns_ = {text_width("Week", 10, percent),
+                       std::max(text_width(first.c_str(), 10, percent), text_width(second.c_str(), 10, percent))};
+    const auto now = reference_time_ ? reference_time_ : static_cast<std::int64_t>(std::time(nullptr));
+    const auto first_reset = hover_reset(session.resets_at, now);
+    const auto second_reset = hover_reset(weekly.resets_at, now);
+    const float reset_width = std::max(text_width(first_reset.c_str(), 9, percent),
+                                       text_width(second_reset.c_str(), 9, percent));
+    const bool show_resets = preferences_.appearance.show_resets &&
+        frame_width_ >= 12 + text_width(title, 10, percent) + widget_columns_.label +
+                        widget_columns_.percent + reset_width + 24 + 5 * bar_gap();
+    auto root = column(0, bar_gap());
+    root.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    root.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
+    CLAY (CLAY_ID("CodexSplit"), root) {
+        text(title, 10, provider_color("Codex"), percent);
+        auto rows = column(0, 2);
+        CLAY_AUTO_ID (rows) {
+            for (int i = 0; i < 2; ++i) {
+                auto row = column(0, bar_gap());
+                row.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+                row.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
+                CLAY_AUTO_ID (row) {
+                    compact_bar(i == 0 ? "Codex5h" : "CodexWeekly", i == 0 ? "5h" : "Week",
+                                i == 0 ? session.remaining : weekly.remaining,
+                                label(i == 0 ? first : second), percent);
+                    if (show_resets) {
+                        auto reset = column(0, 0);
+                        reset.layout.sizing.width = CLAY_SIZING_FIXED(reset_width);
+                        CLAY_AUTO_ID (reset) {
+                            text(label(i == 0 ? first_reset : second_reset), 9,
+                                 {166, 187, 208, 255}, percent);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    widget_columns_ = previous;
+}
 void View::claude_only(const AccountUsage& account, const Allowance& weekly, const Allowance& fable) {
     const auto general_percent = std::to_string(weekly.remaining) + "%";
     const auto fable_percent = std::to_string(fable.remaining) + "%";
-    Clay_TextElementConfig config{};
-    config.fontId = 1;
-    config.fontSize = static_cast<uint16_t>(std::lround(10 * preferences_.appearance.text_percent / 100.f));
-    const auto measure_percent = [&](const std::string& value) {
-        const Clay_StringSlice sample{static_cast<int32_t>(value.size()), value.c_str(), value.c_str()};
-        return widgets_->measureText(sample, &config, widgets_->measureTextUserData).width;
-    };
-    const float percent_width =
-        std::ceil(std::max(measure_percent(general_percent), measure_percent(fable_percent)));
-    auto row = column(0, widget_gap(6, 1));
+    const bool stale = !account.error.empty();
+    const auto previous = widget_columns_;
+    widget_columns_ = {text_width(stale ? "General *" : "General", 10),
+                       std::max(text_width(general_percent.c_str(), 10), text_width(fable_percent.c_str(), 10))};
+    auto row = column(0, bar_gap());
     row.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
     row.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
     CLAY (CLAY_ID("ClaudeOnly"), row) {
@@ -521,16 +576,16 @@ void View::claude_only(const AccountUsage& account, const Allowance& weekly, con
             bars.layout.childGap = widget_gap(12, 2);
         }
         CLAY (CLAY_ID("ClaudeOnlyBars"), bars) {
-            compact_bar("ClaudeGeneral", account.error.empty() ? "General" : "General *", weekly.remaining,
-                        label(general_percent), true, percent_width);
-            compact_bar("ClaudeFable", account.error.empty() ? "Fable" : "Fable *", fable.remaining,
-                        label(fable_percent), true, percent_width);
+            compact_bar("ClaudeGeneral", stale ? "General *" : "General", weekly.remaining,
+                        label(general_percent));
+            compact_bar("ClaudeFable", stale ? "Fable *" : "Fable", fable.remaining, label(fable_percent));
         }
+        widget_columns_ = previous;
         if (preferences_.appearance.show_resets) {
             const bool shared =
                 weekly.resets_at > 0 && fable.resets_at > 0 &&
                 reset_time(weekly.resets_at, true, true) == reset_time(fable.resets_at, true, true);
-            const bool narrow = preferences_.appearance.widget_width < 208;
+            const bool narrow = narrow_widget();
             auto first = reset_time(weekly.resets_at, narrow);
             auto second = reset_time(fable.resets_at, narrow);
             if (shared) {
@@ -553,38 +608,67 @@ void View::claude_only(const AccountUsage& account, const Allowance& weekly, con
         }
     }
 }
+void View::column_text(float width, const char* value, uint16_t size, Clay_Color tint, uint16_t left_padding) {
+    if (width <= 0 && left_padding == 0) {
+        text(value, size, tint);
+        return;
+    }
+    auto fixed = column(0, 0);
+    fixed.layout.sizing.width = CLAY_SIZING_FIXED((width > 0 ? width : text_width(value, size)) + left_padding);
+    fixed.layout.padding.left = left_padding;
+    CLAY_AUTO_ID (fixed) {
+        text(value, size, tint);
+    }
+}
+// Reset dates for the paired Claude row: one date when both fall on the same
+// local day, otherwise weekly then Fable weekly.
+static std::string combined_resets(const Allowance& weekly, const Allowance& fable, bool narrow) {
+    auto resets = format_reset_time(weekly.resets_at, true, false, false);
+    if (weekly.resets_at <= 0 || fable.resets_at <= 0 ||
+        format_reset_time(weekly.resets_at, true, true, false) != format_reset_time(fable.resets_at, true, true, false))
+        resets += (narrow ? "|" : " / ") + format_reset_time(fable.resets_at, true, false, false);
+    return std::string(narrow ? "" : "reset ") + resets;
+}
 void View::taskbar_allowance(const char* name, const char* title, const Allowance& allowance, bool stale,
                              bool show_reset, bool date_only) {
-    auto row = column(0, 8);
+    auto row = column(0, bar_gap());
     row.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
     row.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
     CLAY_AUTO_ID (row) {
         compact_bar(name, label(std::string(title) + (stale ? " *" : "")), allowance.remaining,
                     label(std::to_string(allowance.remaining) + "%"));
         if (preferences_.appearance.show_resets && show_reset)
-            text(label(std::string(std::strcmp(name, "Codex") == 0 ? "" : "reset ") +
-                       reset_time(allowance.resets_at,
-                                  date_only || preferences_.appearance.widget_width < 208)),
-                 9, {166, 187, 208, 255});
+            column_text(widget_columns_.reset,
+                        label(std::string(std::strcmp(name, "Codex") == 0 ? "" : "reset ") +
+                              reset_time(allowance.resets_at,
+                                         date_only || narrow_widget())),
+                        9, {166, 187, 208, 255}, static_cast<uint16_t>(6 - bar_gap()));
     }
 }
 void View::claude_bars(const AccountUsage& account, const Allowance& weekly, const Allowance& fable) {
-    const bool narrow = preferences_.appearance.widget_width < 208;
-    auto row = column(0, widget_gap(narrow ? 3 : 5, 1));
+    const bool narrow = narrow_widget();
+    auto row = column(0, bar_gap());
     row.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
     row.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
     CLAY (CLAY_ID("Claude"), row) {
-        text(account.error.empty() ? "Claude" : "Claude *", 10, {172, 190, 210, 255});
-        auto tracks = column(0, 2);
+        column_text(widget_columns_.label, account.error.empty() ? "Claude" : "Claude *", 10,
+                    {172, 190, 210, 255});
+        // Both tracks share the row with a 10 pt label: each is one pixel thinner
+        // than a full bar, capped so the pair and their gap never outgrow the label.
+        const float row_text = static_cast<float>(std::lround(10 * surface_text_percent() / 100.f));
+        const float track_gap = row_text >= 14 ? 2.f : 1.f;
+        const float track_height =
+            std::clamp(static_cast<float>(preferences_.appearance.bar_height) - 1.f, 2.f,
+                       std::max(2.f, (row_text - track_gap) / 2));
+        auto tracks = column(0, static_cast<uint16_t>(track_gap));
         CLAY (CLAY_ID("ClaudeTracks"), tracks) {
             for (int i = 0; i < 2; ++i) {
                 Clay_ElementDeclaration track{};
                 track.layout.sizing.width = CLAY_SIZING_GROW(0);
-                track.layout.sizing.height = CLAY_SIZING_FIXED(
-                    1.5f * static_cast<float>(std::max(1, (preferences_.appearance.bar_height - 1) / 2)));
+                track.layout.sizing.height = CLAY_SIZING_FIXED(track_height);
                 track.backgroundColor = widgets_->theme.borderColor;
                 track.cornerRadius =
-                    CLAY_CORNER_RADIUS(static_cast<float>(preferences_.appearance.corner_radius));
+                    CLAY_CORNER_RADIUS(12);
                 CLAY (id(i == 0 ? "ClaudeWeeklyTrack" : "ClaudeFableTrack"), track) {
                     Clay_ElementDeclaration fill{};
                     fill.layout.sizing.width =
@@ -592,63 +676,51 @@ void View::claude_bars(const AccountUsage& account, const Allowance& weekly, con
                     fill.layout.sizing.height = CLAY_SIZING_GROW(0);
                     fill.backgroundColor = provider_color("Claude", i == 1);
                     fill.cornerRadius =
-                        CLAY_CORNER_RADIUS(static_cast<float>(preferences_.appearance.corner_radius));
+                        CLAY_CORNER_RADIUS(12);
                     CLAY_AUTO_ID (fill) {
                     }
                 }
             }
         }
-        text(label(std::to_string(weekly.remaining) + (narrow ? "/" : " / ") +
-                   std::to_string(fable.remaining) + "%"),
-             10, {236, 243, 250, 255});
-        if (preferences_.appearance.show_resets) {
-            auto resets = reset_time(weekly.resets_at, true);
-            if (weekly.resets_at <= 0 || fable.resets_at <= 0 ||
-                reset_time(weekly.resets_at, true, true) != reset_time(fable.resets_at, true, true))
-                resets += (narrow ? "|" : " / ") + reset_time(fable.resets_at, true);
-            text(label(std::string(narrow ? "" : "reset ") + resets), 9, {166, 187, 208, 255});
-        }
+        column_text(widget_columns_.percent,
+                    label(std::to_string(weekly.remaining) + (narrow ? "/" : " / ") +
+                          std::to_string(fable.remaining) + "%"),
+                    10, {236, 243, 250, 255});
+        if (preferences_.appearance.show_resets)
+            column_text(widget_columns_.reset, label(combined_resets(weekly, fable, narrow)), 9,
+                        {166, 187, 208, 255}, static_cast<uint16_t>(6 - bar_gap()));
     }
 }
 const char* View::label(std::string value) {
     labels_.push_back(std::move(value));
     return labels_.back().c_str();
 }
-Clay_Dimensions widget_size(const Usage& data, const Appearance& appearance, int spacing_percent) {
-    int rows = 1;
-    if (data.live && appearance.text_percent > 160 + (100 - spacing_percent) / 5) {
-        if (data.codex_active() && data.claude_active())
-            rows = 2;
-        else if (data.claude_active()) {
-            const auto& windows = data.claude.windows;
-            const bool weekly = std::any_of(windows.begin(), windows.end(),
-                                            [](const auto& w) { return w.label == "Weekly"; });
-            const bool fable = std::any_of(windows.begin(), windows.end(),
-                                           [](const auto& w) { return w.label == "Fable weekly"; });
-            if (weekly && fable)
-                rows = 2;
-        }
-    }
-    const float savings = (8.f + 10.f * (rows - 1) + 4.f * rows) * (100 - spacing_percent) / 100.f;
-    return {appearance.widget_width * appearance.text_percent / 100.f * rows - savings,
-            static_cast<float>(widget_height)};
+Clay_Dimensions widget_size(const Appearance& appearance) {
+    return {static_cast<float>(appearance.widget_width), static_cast<float>(widget_height)};
 }
-WidgetPlacement place_widget(const Usage& data, const Appearance& appearance, Rect panel,
-                             const std::vector<Rect>& occupied, float scale) {
+Rect place_widget(const Appearance& appearance, Rect panel, const std::vector<Rect>& occupied, float scale) {
     if (scale <= 0) return {};
-    auto fitted = appearance;
-    for (int percent = appearance.text_percent; percent >= preference_limits::text_percent.min; --percent) {
-        fitted.text_percent = percent;
-        // Preserve font size first: tighten spacing before trying smaller text.
-        for (int spacing = 100; spacing >= 0; spacing -= 10) {
-            const auto size = widget_size(data, fitted, spacing);
-            const auto bounds = find_space(panel, occupied, static_cast<int>(std::lround(size.width * scale)),
-                                           static_cast<int>(std::lround(size.height * scale)),
-                                           static_cast<int>(std::ceil(8 * scale)), appearance.position);
-            if (!bounds.empty()) return {bounds, percent, spacing};
-        }
+    // Text is never reduced to fit a gap: the bars give way as the widget narrows
+    // toward the smallest allowed width.
+    for (int width = appearance.widget_width; width >= preference_limits::widget_width.min; width -= 10) {
+        const auto bounds = find_space(panel, occupied, static_cast<int>(std::lround(width * scale)),
+                                       static_cast<int>(std::lround(widget_height * scale)),
+                                       static_cast<int>(std::ceil(8 * scale)), appearance.position);
+        if (!bounds.empty()) return bounds;
     }
     return {};
+}
+int View::widget_spacing_for(float width) const {
+    const auto& a = preferences_.appearance;
+    const float range = static_cast<float>(a.widget_width - preference_limits::widget_width.min);
+    int spacing = 100;
+    if (range > 0)
+        spacing = std::clamp(static_cast<int>(std::lround(
+                                 100.f * (width - preference_limits::widget_width.min) / range)),
+                             0, 100);
+    if (a.text_percent > 160 && a.text_percent <= 180)
+        spacing = std::min(spacing, 100 - 5 * (a.text_percent - 160));
+    return spacing;
 }
 Clay_Dimensions hover_size(const Usage& data, int text_percent) {
     const float scale = text_percent / 100.f;
@@ -729,15 +801,30 @@ void View::hover_usage(const Usage& data) {
             auto provider = column(0, 6);
             CLAY (id(label(std::string("Hover") + entry.first)), provider) {
                 auto header = column(0, 4);
-                header.layout.layoutDirection = CLAY_TOP_TO_BOTTOM;
+                header.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
                 header.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
                 CLAY_AUTO_ID (header) {
                     text(label(std::string(entry.first) +
                                (account.error.empty() ? "" : account.windows.empty() ? " - unavailable" : " - stale")),
                          14, account.error.empty() ? provider_color(entry.first) : Clay_Color{240, 180, 90, 255});
+                    auto spacer = column(0, 0);
+                    CLAY_AUTO_ID (spacer) {}
                     if (!account.windows.empty())
                         text(label(freshness(account.updated, now)), 11, {157, 174, 193, 255});
                 }
+                if (!account.plan.empty())
+                    text(label("Plan: " + account.plan), 11, {157, 174, 193, 255});
+                if (account.unlimited_credits)
+                    text(label("Credits: unlimited"), 12, {157, 174, 193, 255});
+                else if (!account.credit_balance.empty())
+                    text(label("Credits: " + account.credit_balance), 12, {157, 174, 193, 255});
+                else if (account.has_credits.has_value())
+                    text(label(*account.has_credits ? "Credits available" : "No credits remaining"),
+                                 12, {157, 174, 193, 255});
+                if (account.available_resets.has_value())
+                    text(label(std::to_string(*account.available_resets) +
+                                     (*account.available_resets == 1 ? " earned reset available" : " earned resets available")),
+                                 12, {157, 174, 193, 255});
                 if (account.windows.empty())
                     text(account.error.empty() ? "Connecting..." : "Refresh failed - click widget", 13,
                          {157, 174, 193, 255});
@@ -752,7 +839,6 @@ void View::hover_usage(const Usage& data) {
             text(!data.codex_enabled && !data.claude_enabled ? "Providers disabled - open settings"
                                                              : "No supported installations detected",
                  14, {157, 174, 193, 255});
-        text("Click widget for details - times local", 11, {157, 174, 193, 255});
     }
 }
 void View::live_usage(const char* provider, const AccountUsage& account, Frame& result,
@@ -789,7 +875,7 @@ void View::live_usage(const char* provider, const AccountUsage& account, Frame& 
                     auto card = column(10, 6);
                     card.backgroundColor = widgets_->theme.surfaceColor;
                     card.cornerRadius =
-                        CLAY_CORNER_RADIUS(static_cast<float>(preferences_.appearance.corner_radius));
+                        CLAY_CORNER_RADIUS(12);
                     CLAY_AUTO_ID (card) {
                         compact_bar(name, window.label.c_str(), window.remaining, percent);
                         text(label(std::to_string(window.remaining) + "% remaining / " +
@@ -858,6 +944,40 @@ void View::live_panel(const Usage& data, Frame& result, ClayWidgets_Input input)
         root.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
         if (horizontal)
             root.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+        // Stacked rows share label and percentage columns so both bars start and
+        // end on the same x; side-by-side rows and single providers size their own.
+        widget_columns_ = {};
+        if (!horizontal && data.codex_active() && data.claude_active()) {
+            const bool narrow = narrow_widget();
+            for (const auto& entry : {std::pair<const char*, const AccountUsage*>{"Codex", &data.codex},
+                                      {"Claude", &data.claude}}) {
+                const auto& account = *entry.second;
+                if (account.windows.empty())
+                    continue;
+                const std::string title = std::string(entry.first) + (account.error.empty() ? "" : " *");
+                widget_columns_.label = std::max(widget_columns_.label, text_width(title.c_str(), 10));
+                const auto lowest = std::min_element(
+                    account.windows.begin(), account.windows.end(),
+                    [](const auto& a, const auto& b) { return a.remaining < b.remaining; });
+                std::string percent = std::to_string(lowest->remaining) + "%";
+                std::string reset = std::string(entry.second == &data.codex ? "" : "reset ") +
+                                    reset_time(lowest->resets_at, narrow);
+                if (entry.second == &data.claude) {
+                    const auto weekly = std::find_if(account.windows.begin(), account.windows.end(),
+                                                     [](const auto& w) { return w.label == "Weekly"; });
+                    const auto fable = std::find_if(account.windows.begin(), account.windows.end(),
+                                                    [](const auto& w) { return w.label == "Fable weekly"; });
+                    if (weekly != account.windows.end() && fable != account.windows.end()) {
+                        percent = std::to_string(weekly->remaining) + (narrow ? "/" : " / ") +
+                                  std::to_string(fable->remaining) + "%";
+                        reset = combined_resets(*weekly, *fable, narrow);
+                    }
+                }
+                widget_columns_.percent = std::max(widget_columns_.percent, text_width(percent.c_str(), 10));
+                if (preferences_.appearance.show_resets)
+                    widget_columns_.reset = std::max(widget_columns_.reset, text_width(reset.c_str(), 9));
+            }
+        }
         CLAY (CLAY_ID("Providers"), root) {
             for (const auto& entry : {std::pair<const char*, const AccountUsage*>{"Codex", &data.codex},
                                       {"Claude", &data.claude}}) {
@@ -877,6 +997,16 @@ void View::live_panel(const Usage& data, Frame& result, ClayWidgets_Input input)
                         continue;
                     }
                 }
+                if (entry.second == &data.codex && !data.claude_active()) {
+                    const auto session = std::find_if(account.windows.begin(), account.windows.end(),
+                        [](const auto& window) { return window.label == "5 hour"; });
+                    const auto weekly = std::find_if(account.windows.begin(), account.windows.end(),
+                        [](const auto& window) { return window.label == "Weekly"; });
+                    if (session != account.windows.end() && weekly != account.windows.end()) {
+                        codex_only_split(account, *session, *weekly);
+                        continue;
+                    }
+                }
                 const auto lowest =
                     std::min_element(account.windows.begin(), account.windows.end(),
                                      [](const auto& a, const auto& b) { return a.remaining < b.remaining; });
@@ -886,17 +1016,25 @@ void View::live_panel(const Usage& data, Frame& result, ClayWidgets_Input input)
                          10, {240, 180, 90, 255});
                 else if (entry.second == &data.codex && !data.claude_active() &&
                          preferences_.appearance.show_resets) {
-                    auto codex = column(0, 2);
-                    CLAY (CLAY_ID("CodexOnly"), codex) {
-                        // Keep both lines legible inside the taskbar's fixed height.
-                        const int percent = std::min(preferences_.appearance.text_percent, 160);
-                        compact_bar("Codex", account.error.empty() ? "Codex" : "Codex *", lowest->remaining,
-                                    label(std::to_string(lowest->remaining) + "%"), false, 0, percent);
-                        auto reset = column(0, 0);
-                        reset.layout.childAlignment.x = CLAY_ALIGN_X_CENTER;
-                        CLAY (CLAY_ID("CodexReset"), reset) {
-                            text(label("reset " + reset_time(lowest->resets_at)), 9, {166, 187, 208, 255},
-                                 percent);
+                    const int percent = std::min(preferences_.appearance.text_percent, 160);
+                    const auto now = reference_time_ ? reference_time_ : static_cast<std::int64_t>(std::time(nullptr));
+                    const auto subtitle = lowest->label + ", " + hover_reset(lowest->resets_at, now);
+                    int subtitle_percent = std::min(percent, 145);
+                    while (subtitle_percent > 50 &&
+                           text_width(subtitle.c_str(), 11, subtitle_percent) > frame_width_ - 12)
+                        --subtitle_percent;
+                    // Keep the bar aligned with the full widget and its hover card.
+                    // The reset subtitle must not determine the visible row width.
+                    auto container = column(0, 0);
+                    CLAY_AUTO_ID (container) {
+                        auto codex = column(0, 2);
+                        CLAY (CLAY_ID("CodexOnly"), codex) {
+                            compact_bar("Codex", account.error.empty() ? "Codex" : "Codex *", lowest->remaining,
+                                        label(std::to_string(lowest->remaining) + "%"), percent);
+                            auto reset = column(0, 0);
+                            CLAY (CLAY_ID("CodexReset"), reset) {
+                                text(label(subtitle), 11, {166, 187, 208, 255}, subtitle_percent);
+                            }
                         }
                     }
                 } else
@@ -906,7 +1044,7 @@ void View::live_panel(const Usage& data, Frame& result, ClayWidgets_Input input)
     } else if (!data.codex_active() && !data.claude_active()) {
         auto root = column(6, 4);
         CLAY (CLAY_ID("NoProviders"), root) {
-            const bool narrow = surface_ == Surface::Widget && preferences_.appearance.widget_width < 208;
+            const bool narrow = surface_ == Surface::Widget && narrow_widget();
             text(!data.codex_enabled && !data.claude_enabled
                      ? (narrow ? "Providers disabled" : "Providers disabled - open settings")
                      : (narrow ? "No providers detected" : "No supported installations detected"),
@@ -959,7 +1097,7 @@ void View::demo_hover(const Usage& data) {
         for (int index = 0; index < 2; ++index) {
             auto card = column(10, 6);
             card.backgroundColor = widgets_->theme.surfaceColor;
-            card.cornerRadius = CLAY_CORNER_RADIUS(static_cast<float>(preferences_.appearance.corner_radius));
+            card.cornerRadius = CLAY_CORNER_RADIUS(12);
             CLAY_AUTO_ID (card) {
                 compact_bar(index == 0 ? "HoverSession" : "HoverWeekly", index == 0 ? "Session" : "Weekly",
                             index == 0 ? data.session() : data.weekly(), index == 0 ? session_ : weekly_);
@@ -1069,7 +1207,12 @@ void View::demo_details(Usage& data, Frame& result, ClayWidgets_Input input) {
 }
 Frame View::frame(Usage& data, ClayWidgets_Input input, float width, float height) {
     Clay_SetCurrentContext(clay_);
+    frame_width_ = width;
     labels_.clear();
+    if (surface_ == Surface::Widget) {
+        widget_width_ = width;
+        widget_spacing_ = widget_spacing_for(width);
+    }
     apply_theme();
     Frame result;
     const bool dismiss_dropdown = input.keyEscape && widgets_->openComboId != 0;

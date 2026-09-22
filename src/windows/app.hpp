@@ -38,10 +38,13 @@ class App {
     std::filesystem::path settings_path_;
     ui::Pixels details_pixels_;
     ClayWidgets_Input details_pointer_{};
+    // The popup is the only animated surface. Input starts a short frame loop
+    // that keeps rendering with real deltaTime until the motion has settled.
+    const bool animations_allowed_;
+    std::chrono::steady_clock::time_point details_rendered_{};
+    std::chrono::steady_clock::time_point details_settle_until_{};
     unsigned widget_frames_{}, details_frames_{};
     float widget_scale_{}, details_scale_{};
-    int widget_text_percent_{};
-    int widget_spacing_percent_{100};
     TaskbarReader reader_;
     HWND controller_{}, widget_{}, popup_{}, hover_{};
     NOTIFYICONDATAW tray_{};
@@ -55,6 +58,7 @@ class App {
 
     void load_settings();
     void update_system_font();
+    void update_animation_preference();
     bool save_settings(Preferences value);
     void begin_settings_preview();
     void preview_settings(Preferences value);
@@ -87,6 +91,8 @@ class App {
     float popup_scale() const;
     void close_details();
     void render_details(ClayWidgets_Input input);
+    void render_details_frame(ClayWidgets_Input input);
+    void animate_details();
     void paint_details(HWND window);
     static void paint_pixels(HWND window, const ui::Pixels& pixels);
     void details_event(HWND window, UINT message, WPARAM w, LPARAM l);

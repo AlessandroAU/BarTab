@@ -238,13 +238,8 @@ void App::tick() {
         set_status(L"Taskbar layout is stale. Waiting for Explorer.");
     } else {
         const double scale = snapshot.dpi / 96.0;
-        const auto placement = ui::place_widget(usage_, preferences_.appearance, snapshot.bounds,
-                                                 snapshot.occupied, static_cast<float>(scale));
-        const auto target = placement.bounds;
-        const bool text_changed = widget_text_percent_ != placement.text_percent ||
-                                  widget_spacing_percent_ != placement.spacing_percent;
-        widget_spacing_percent_ = placement.spacing_percent;
-        widget_text_percent_ = placement.text_percent;
+        const auto target = ui::place_widget(preferences_.appearance, snapshot.bounds, snapshot.occupied,
+                                             static_cast<float>(scale));
         if (target.empty()) {
             hide_widget();
             set_status(L"No free taskbar space. Use the tray icon.");
@@ -258,7 +253,7 @@ void App::tick() {
                 // Per-pixel alpha is supplied by paint_widget. Do not call
                 // SetLayeredWindowAttributes: it disables UpdateLayeredWindow.
             }
-            const bool unchanged = !text_changed && widget_ && IsWindowVisible(widget_) && target == widget_bounds_;
+            const bool unchanged = widget_ && IsWindowVisible(widget_) && target == widget_bounds_;
             if (widget_ && (unchanged || SetWindowPos(widget_, HWND_TOP, target.x - snapshot.bounds.x,
                                                       target.y - snapshot.bounds.y, target.width,
                                                       target.height, SWP_NOACTIVATE | SWP_SHOWWINDOW))) {
@@ -297,11 +292,7 @@ void App::paint_widget(HWND window) {
             widget_view_.invalidate_measurements();
             widget_scale_ = scale;
         }
-        widget_view_.set_widget_spacing(widget_spacing_percent_);
-        const int requested_percent = widget_view_.text_percent();
-        widget_view_.set_text_percent(widget_text_percent_ > 0 ? widget_text_percent_ : requested_percent);
         const auto frame = widget_view_.frame(usage_, {}, bounds.right / scale, widget_height);
-        widget_view_.set_text_percent(requested_percent);
         const auto pixels = renderer_.render(frame.commands, bounds.right, bounds.bottom, scale, true);
         HDC dc = GetDC(nullptr);
         HDC buffer = CreateCompatibleDC(dc);

@@ -27,6 +27,8 @@ Usage demo_usage() {
     data.live = true;
     data.codex.installed = true;
     data.codex.plan = "ChatGPT Pro";
+    data.codex.credit_balance = "12.5";
+    data.codex.available_resets = 2;
     data.codex.executable_path = "C:/Users/demo/AppData/Local/Codex/codex.exe";
     data.codex.windows = {{"5 hour", 62, session_reset}, {"Weekly", 81, weekly_reset}};
     data.codex.updated = session_reset - 8100;
@@ -93,7 +95,7 @@ int main(int argc, char** argv) {
         const auto& appearance = preferences.appearance;
         bool ok = true;
 
-        const auto widget = ui::widget_size(data, appearance);
+        const auto widget = ui::widget_size(appearance);
         ok = shooter.shoot("taskbar-widget", ui::Surface::Widget, data, preferences, widget.width,
                            widget.height, taskbar_backdrop) &&
              ok;
@@ -103,10 +105,23 @@ int main(int argc, char** argv) {
         claude_only.codex_enabled = false;
         Preferences claude_preferences = preferences;
         claude_preferences.codex_enabled = false;
-        const auto claude_widget = ui::widget_size(claude_only, claude_preferences.appearance);
+        const auto claude_widget = ui::widget_size(claude_preferences.appearance);
         ok = shooter.shoot("taskbar-widget-claude", ui::Surface::Widget, claude_only, claude_preferences,
                            claude_widget.width, claude_widget.height, taskbar_backdrop) &&
              ok;
+
+        Usage codex_only = data;
+        codex_only.claude_enabled = false;
+        Preferences codex_preferences = preferences;
+        codex_preferences.claude_enabled = false;
+        ok = shooter.shoot("taskbar-widget-codex-split", ui::Surface::Widget, codex_only,
+                           codex_preferences, 400, widget_height, taskbar_backdrop) && ok;
+        ok = shooter.shoot("taskbar-widget-codex-split-narrow", ui::Surface::Widget, codex_only,
+                           codex_preferences, 150, widget_height, taskbar_backdrop) && ok;
+
+        codex_only.codex.windows.erase(codex_only.codex.windows.begin());
+        ok = shooter.shoot("taskbar-widget-codex-single", ui::Surface::Widget, codex_only,
+                           codex_preferences, 208, widget_height, taskbar_backdrop) && ok;
 
         auto hover = ui::hover_size(data, appearance.hover_text_percent);
         hover.width = widget.width;

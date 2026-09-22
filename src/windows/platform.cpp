@@ -19,6 +19,12 @@ bool apps_light_theme() {
         return light != 0;
     return system_light_theme();
 }
+bool client_animations_enabled() {
+    BOOL enabled = TRUE;
+    if (!SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0))
+        return true;
+    return enabled != FALSE;
+}
 Color windows_accent() {
     DWORD value{};
     BOOL opaque{};

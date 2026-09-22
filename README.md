@@ -50,7 +50,7 @@ Settings has two independently scrolling panels — **Appearance** and **Provide
 | Setting | Range | Default |
 | --- | --- | --- |
 | Taskbar text size | 100–300% | 150% |
-| Widget width | 100–400 px | 150 px |
+| Widget width | 100–400 px | 225 px |
 | Taskbar position | 0–100% from left | 100% |
 | Bar thickness | 3–9 px | 7 px |
 | Corner radius | 0–12 px | 10 px |
@@ -61,7 +61,7 @@ Settings has two independently scrolling panels — **Appearance** and **Provide
 
 Colors and the UI font follow Windows automatically. The application uses Windows app light/dark mode and accent color; the taskbar follows the separate Windows system mode. The font comes from the Windows UI message-font configuration and updates when Windows broadcasts a settings change. Provider colors stay distinct. Older saved Font, Theme, Accent, and HoverWidth keys are ignored. Text size remains adjustable.
 
-Dimensions are logical pixels, before text and DPI scaling. The taskbar first tightens padding and gaps to keep your requested text size. Compact spacing lets two rows stay stacked up to 180%; larger text uses side-by-side rows to fit the taskbar height. If the requested size still cannot fit a free taskbar gap, the widget uses the largest text size that fits and restores the requested size and roomier spacing when space becomes available; the hover card keeps its own text size regardless. **Reset appearance to defaults** leaves provider settings alone.
+Dimensions are logical pixels, before DPI scaling. Widget width is the widget's real width: text size never changes it, and the bars take whatever room the labels leave, so very large text in a narrow widget squeezes the bars away rather than shrinking the text. Compact spacing lets two rows stay stacked up to 180%; larger text uses side-by-side rows to fit the taskbar height. When a free taskbar gap is narrower than the widget, it narrows down to the 100 px minimum, tightening padding and gaps as it shrinks so the bars keep as much length as possible, and hides only when even that does not fit; the full width returns when space becomes available. The hover card keeps its own text size regardless. **Reset appearance to defaults** leaves provider settings alone.
 
 **Taskbar position** slides the widget along the taskbar: 0% is hard left, 50% centred, 100% hard right. The slider names the spot you want, and the widget takes the closest one it can actually reach — it lands in whichever run of free space gets nearest, so it can sit up against a taskbar button but never underneath one. Free space is recomputed as buttons come and go, so this is a preference rather than a fixed coordinate: on a busy taskbar only one gap may be wide enough, and every position resolves to it.
 
@@ -73,17 +73,19 @@ Each provider has its own enable toggle and update interval (15 s, 30 s, or 1, 2
 
 ### What the taskbar row shows
 
-The taskbar has room for less than the hover card, so it summarises. Codex shows its lowest remaining allowance. When both providers are active and Claude reports both Weekly and Fable weekly, Claude's row splits into two thin tracks — overall weekly above Fable weekly — with percentages and reset dates in the same order (`44 / 23%`). With only Claude enabled, **General** and **Fable** get separate rows:
+The taskbar has room for less than the hover card, so it summarises. Codex shows its lowest remaining allowance. When both providers are active and Claude reports both Weekly and Fable weekly, Claude's row splits into two stacked tracks, each a pixel thinner than a full bar and capped to the row's label height — overall weekly above Fable weekly — with percentages and reset dates in the same order (`44 / 23%`). With only Claude enabled, **General** and **Fable** get separate rows:
 
 ![The taskbar row with only Claude enabled](docs/images/taskbar-widget-claude.png)
 
-Reset times appear as `DD/MM HH:MM`, shortened to `DD/MM` on the paired row and at widths under 208 px; exact times stay in the hover card. `?` means unavailable. A failed refresh marks retained readings stale rather than inventing numbers.
+When Codex alone reports both 5-hour and weekly windows, the widget shows two labeled bars with aligned percentages. Reset descriptions appear beside the rows when space permits; otherwise they remain in the hover card. With only one reported window, the single bar keeps a descriptive reset line underneath, such as `Weekly, Resets in 2h 14m` or `Weekly, Resets Mon, 18:14`, matching the hover card. Other taskbar reset times appear as `DD/MM HH:MM`, shortened to `DD/MM` on the paired row and at widths under 208 px; exact times stay in the hover card. `?` means unavailable. A failed refresh marks retained readings stale rather than inventing numbers.
+
+The hover card also shows each reported plan and, for Codex, credit balance/status and earned reset count when available. Missing account metadata is omitted. Settings also offers 24-hour or 12-hour (AM/PM) clock formatting for reset and update times; relative countdowns stay unchanged.
 
 ## How it works
 
 Raylib owns a single hidden OpenGL context and draws Clay commands into cached offscreen textures; Windows then presents those pixels in native windows. GDI only blits. The tray, context menu and title bar stay native OS surfaces.
 
-There is **no game loop**. Animations are off, and redraws happen on input, value changes, DPI or geometry changes, plus once a minute while the hover card is visible to update countdowns. An unchanged placement tick does not repaint, and the hidden popup has no timer. The tradeoff is that each redraw copies pixels from GPU to CPU; for surfaces this small that is an integration choice, not a measured battery win.
+There is **no game loop**. Redraws happen on input, value changes, DPI or geometry changes, plus once a minute while the hover card is visible to update countdowns. The settings and usage window is the one animated surface: hover fades, toggle knobs and wheel momentum ease, so each input starts a 60 Hz frame loop that stops half a second after the last input, once every transition has settled. It follows the Windows **Animation effects** accessibility switch, and the taskbar widget and hover card stay static. An unchanged placement tick does not repaint, and the hidden popup has no timer. The tradeoff is that each redraw copies pixels from GPU to CPU; for surfaces this small that is an integration choice, not a measured battery win.
 
 The taskbar bitmap uses a background alpha of 1/255, so it looks transparent but keeps a full rectangular click target. A worker thread finds unoccupied taskbar space via UI Automation; the widget hides when no gap fits and is recreated if its parent disappears. There is no reserved taskbar space, so a newly appearing button can overlap briefly between snapshots.
 

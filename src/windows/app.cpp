@@ -6,7 +6,8 @@
 
 namespace usage::windows {
 
-App::App(bool smoke, bool live_test) : smoke_(smoke), demo_mode_(smoke), live_test_(live_test) {
+App::App(bool smoke, bool live_test)
+    : animations_allowed_(!smoke), smoke_(smoke), demo_mode_(smoke), live_test_(live_test) {
     register_class(controller_class, controller_proc);
     register_class(widget_class, widget_proc);
     register_class(popup_class, popup_proc);
@@ -17,6 +18,7 @@ App::App(bool smoke, bool live_test) : smoke_(smoke), demo_mode_(smoke), live_te
     if (!controller_)
         throw std::runtime_error("Could not create controller window");
     update_system_font();
+    update_animation_preference();
     load_settings();
     usage_.live = !smoke;
     if (!smoke) {
@@ -40,6 +42,12 @@ void App::update_system_font() {
     if (IsWindowVisible(popup_)) render_details(details_pointer_);
     if (IsWindowVisible(hover_)) show_hover();
     if (widget_) InvalidateRect(widget_, nullptr, FALSE);
+}
+
+// Smoke tests drive the popup synchronously and read layout back, so they keep
+// the deterministic path; otherwise follow the Windows accessibility switch.
+void App::update_animation_preference() {
+    details_view_.set_animations(animations_allowed_ && client_animations_enabled());
 }
 
 App::~App() {
@@ -95,6 +103,7 @@ LRESULT CALLBACK App::controller_proc(HWND window, UINT message, WPARAM w, LPARA
     if (app) {
         if (message == WM_SETTINGCHANGE || message == WM_THEMECHANGED || message == WM_SYSCOLORCHANGE) {
             app->update_system_font();
+            app->update_animation_preference();
             app->tick();
             if (app->widget_)
                 InvalidateRect(app->widget_, nullptr, FALSE);
