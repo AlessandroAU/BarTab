@@ -77,6 +77,7 @@ int main() {
         saved.appearance.bold_settings = true;
         saved.appearance.all_taskbars = true;
         saved.appearance.widget_height = 30;
+        saved.appearance.widget_opacity = 40;
         saved.codex_enabled = false;
         saved.claude_enabled = false;
         saved.codex_interval = 45;

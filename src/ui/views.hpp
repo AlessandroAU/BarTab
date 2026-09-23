@@ -39,8 +39,8 @@ struct Frame {
     // The context menu item chosen this frame; `close` means it was dismissed.
     enum class MenuChoice { None, Settings, Debug, Startup, Quit } menu{MenuChoice::None};
 };
-// What the context menu offers. Hosts show the Menu surface in a popup window
-// at the pointer, sized to menu_bounds().
+// What the context menu offers. Hosts without a native menu (Linux) show the
+// Menu surface in a popup window at the pointer, sized to menu_bounds().
 struct MenuModel {
     // "Start at boot" on Windows, "Start at login" elsewhere.
     const char* startup_label{"Start at login"};

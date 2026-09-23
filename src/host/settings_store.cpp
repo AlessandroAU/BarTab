@@ -22,7 +22,7 @@ constexpr AppearanceField appearance_fields[] = {
     {"TextSize", &Appearance::text_percent},     {"HoverTextSize", &Appearance::hover_text_percent},
     {"WidgetWidth", &Appearance::widget_width},  {"HoverOpacity", &Appearance::hover_opacity},
     {"BarHeight", &Appearance::bar_height},      {"Position", &Appearance::position},
-    {"WidgetHeight", &Appearance::widget_height}};
+    {"WidgetHeight", &Appearance::widget_height}, {"WidgetOpacity", &Appearance::widget_opacity}};
 std::string lower(std::string value) {
     for (auto& c : value)
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));

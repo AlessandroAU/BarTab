@@ -486,10 +486,46 @@ void App::paint_widget() {
                 inner.data[static_cast<std::size_t>(y) * inner.width + x];
     // Floating over arbitrary windows, the widget brings its own panel behind it.
     const bool light = host::system_light_theme();
-    ui::fill_behind(pixels, light ? Color{243, 243, 243} : Color{32, 32, 32}, 235);
+    const int opacity = preferences_.appearance.widget_opacity;
+    ui::fill_behind(pixels, light ? Color{243, 243, 243} : Color{32, 32, 32},
+                    static_cast<std::uint8_t>((opacity * 255 + 50) / 100));
     ui::round_corners(pixels, round(widget_radius * scale_));
     widget_pixels_ = std::move(pixels);
     x_.present(widget_, widget_pixels_);
+}
+
+// One step of a drag: keep the point that was pressed under the pointer, and
+// dock into a panel the pointer is over, filling its height.
+void App::drag_widget_to(int root_x, int root_y) {
+    const auto monitor = x_.monitor_at(root_x, root_y);
+    auto dock = Dock::None;
+    if (root_y < monitor.work.y)
+        dock = Dock::Top;
+    else if (root_y >= monitor.work.bottom())
+        dock = Dock::Bottom;
+    Rect bounds = widget_bounds_;
+    bounds.x = root_x - press_->x;
+    if (const auto slot = dock_slot(monitor, dock); !slot.empty()) {
+        bounds.y = slot.y;
+        bounds.height = slot.height;
+    } else {
+        const bool undocking = dock_ != Dock::None;
+        dock = dock_ = Dock::None;
+        if (undocking)
+            reset_floating_height();
+        bounds.height = round(static_cast<float>(preferences_.appearance.widget_height) * scale_);
+        bounds.y = root_y - std::min(press_->y, bounds.height - 1);
+    }
+    bounds = clamp_into(bounds, monitor.bounds);
+    dock_ = dock;
+    if (!(bounds == widget_bounds_)) {
+        const bool resized = bounds.height != widget_bounds_.height;
+        widget_bounds_ = bounds;
+        saved_position_ = std::make_pair(bounds.x, bounds.y);
+        x_.place(widget_, bounds);
+        if (resized)
+            paint_widget();
+    }
 }
 
 void App::widget_event(const x11::Event& event) {
@@ -519,37 +555,7 @@ void App::widget_event(const x11::Event& event) {
                 dragging_ = true;
                 hide_hover(true);
             }
-            // Keep the point that was pressed under the pointer, and dock into
-            // a panel the pointer is over, filling its height.
-            const auto monitor = x_.monitor_at(event.root_x, event.root_y);
-            auto dock = Dock::None;
-            if (event.root_y < monitor.work.y)
-                dock = Dock::Top;
-            else if (event.root_y >= monitor.work.bottom())
-                dock = Dock::Bottom;
-            Rect bounds = widget_bounds_;
-            bounds.x = event.root_x - press_->x;
-            if (const auto slot = dock_slot(monitor, dock); !slot.empty()) {
-                bounds.y = slot.y;
-                bounds.height = slot.height;
-            } else {
-                const bool undocking = dock_ != Dock::None;
-                dock = dock_ = Dock::None;
-                if (undocking)
-                    reset_floating_height();
-                bounds.height = round(static_cast<float>(preferences_.appearance.widget_height) * scale_);
-                bounds.y = event.root_y - std::min(press_->y, bounds.height - 1);
-            }
-            bounds = clamp_into(bounds, monitor.bounds);
-            dock_ = dock;
-            if (!(bounds == widget_bounds_)) {
-                const bool resized = bounds.height != widget_bounds_.height;
-                widget_bounds_ = bounds;
-                saved_position_ = std::make_pair(bounds.x, bounds.y);
-                x_.place(widget_, bounds);
-                if (resized)
-                    paint_widget();
-            }
+            drag_widget_to(event.root_x, event.root_y);
             break;
         }
         if (hover_ && x_.visible(hover_))
@@ -576,6 +582,9 @@ void App::widget_event(const x11::Event& event) {
         break;
     case Type::Release:
         if (event.button == 1 && dragging_) {
+            // Where it is let go counts: a quick flick out of a panel can
+            // release before any motion outside it arrives.
+            drag_widget_to(event.root_x, event.root_y);
             dragging_ = false;
             press_.reset();
             save_position();
@@ -598,8 +607,9 @@ void App::widget_event(const x11::Event& event) {
 // ---- The hover card ----
 
 void App::show_hover() {
+    // The context menu suppresses the card, pinned or not, until it closes.
     if (!preferences_.appearance.hover_enabled || !(hovered_ || hover_pinned_) || !widget_ ||
-        !x_.visible(widget_) || widget_bounds_.empty())
+        !x_.visible(widget_) || widget_bounds_.empty() || (menu_ && x_.visible(menu_)))
         return;
     if (!hover_)
         hover_ = x_.create(x11::Role::Card, {0, 0, 1, 1}, "Usage overview");
@@ -931,7 +941,7 @@ void App::details_event(const x11::Event& event) {
 // ---- Context menu ----
 
 void App::show_menu() {
-    hide_hover();
+    hide_hover(true);
     if (!menu_)
         menu_ = x_.create(x11::Role::Menu, {0, 0, 1, 1}, "UsageTracker menu");
     ui::MenuModel model;
@@ -969,6 +979,8 @@ void App::close_menu() {
         return;
     x_.ungrab();
     x_.hide(menu_);
+    if (hover_pinned_)
+        show_hover();
 }
 
 void App::render_menu(ClayWidgets_Input input) {
@@ -1201,6 +1213,18 @@ void App::run_smoke_test() {
     apply_preferences(taller);
     pump(100);
     check(x_.bounds(widget_).height == round(30 * scale_), "The height setting sizes the widget exactly");
+    // The left edge, halfway down, is in the padding before any text.
+    auto edge_alpha = [this] {
+        return widget_pixels_.data[static_cast<std::size_t>(widget_pixels_.height / 2) * widget_pixels_.width + 1] >>
+               24;
+    };
+    const auto opaque_alpha = edge_alpha();
+    auto clear = preferences_;
+    clear.appearance.widget_opacity = 0;
+    apply_preferences(clear);
+    pump(100);
+    check(opaque_alpha == 235 && edge_alpha() == 0, "The background opacity setting fades the widget's panel");
+    apply_preferences(taller);
     // From the middle of the screen, so the drag has room in every direction.
     const auto middle = x_.monitor_at(0, 0).bounds;
     saved_position_ = std::make_pair(middle.x + middle.width / 2, middle.y + middle.height / 2);
@@ -1268,6 +1292,32 @@ void App::run_smoke_test() {
                   preferences_.appearance.widget_height == 38 &&
                   host::read_settings(settings_path_) == preferences_,
               "Dragged back out, it returns to the standard 38 px height, saved");
+        // A flick out of the panel: the only motion is inside it, and the
+        // button comes up far below.
+        drag_to(screen.x + 300, screen.y + 10);
+        {
+            const auto from = widget_bounds_;
+            auto grab = event(x11::Event::Type::Press, widget_);
+            grab.x = grab.y = 5;
+            grab.root_x = from.x + 5;
+            grab.root_y = from.y + 5;
+            widget_event(grab);
+            auto inside = grab;
+            inside.type = x11::Event::Type::Motion;
+            inside.buttons_held = true;
+            inside.root_x += 40;
+            inside.root_y = screen.y + 12;
+            widget_event(inside);
+            auto flick = inside;
+            flick.type = x11::Event::Type::Release;
+            flick.buttons_held = false;
+            flick.root_y = screen.y + 400;
+            widget_event(flick);
+            pump(100);
+        }
+        const auto flicked = x_.bounds(widget_);
+        check(dock_ == Dock::None && flicked.height == round(38 * scale_) && flicked.y > screen.y + 300,
+              "Flicked out of the panel, it lands where it is let go, at full height");
         // Nothing saved yet: the first-run spot, in the top panel a third of
         // the way in from the right.
         saved_position_.reset();
@@ -1323,6 +1373,10 @@ void App::run_smoke_test() {
 
     // The context menu: right-click opens it, and clicks land on its items by
     // their laid-out bounds, as the pointer would.
+    // Opened over a pinned card, the menu hides it until it closes.
+    pin_hover();
+    pump(100);
+    const bool card_before_menu = hover_ && x_.visible(hover_);
     auto right = event(x11::Event::Type::Release, widget_);
     right.button = 3;
     widget_event(right);
@@ -1331,10 +1385,14 @@ void App::run_smoke_test() {
     check(menu_ && x_.visible(menu_) && menu.width >= 180 &&
               opaque(menu_pixels_) > menu_pixels_.data.size() / 2,
           "Right-click opens the context menu, sized to its panel");
+    hovered_ = true;
+    show_hover();
+    check(card_before_menu && !x_.visible(hover_), "The open menu suppresses the hover card");
     auto escape_menu = event(x11::Event::Type::Key, menu_);
     escape_menu.key = x11::Key::Escape;
     menu_event(escape_menu);
-    check(!x_.visible(menu_), "Escape closes the menu");
+    check(!x_.visible(menu_) && x_.visible(hover_), "Escape closes the menu, and a pinned card returns");
+    unpin_hover();
     auto click_item = [&](const char* name) {
         const auto item = menu_view_.bounds(name);
         auto press = event(x11::Event::Type::Press, menu_);

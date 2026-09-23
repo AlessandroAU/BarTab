@@ -16,7 +16,6 @@ inline constexpr wchar_t controller_class[] = L"UsageTracker.Controller.Cpp";
 inline constexpr wchar_t popup_class[] = L"UsageTracker.Popup.Cpp";
 inline constexpr wchar_t hover_class[] = L"UsageTracker.Hover.Cpp";
 inline constexpr wchar_t confetti_class[] = L"UsageTracker.Confetti.Cpp";
-inline constexpr wchar_t menu_class[] = L"UsageTracker.Menu.Cpp";
 
 // A widget embedded in one taskbar, with its screen bounds.
 struct TaskbarWidget {
@@ -54,13 +53,8 @@ class App {
     ui::View widget_view_{ui::Surface::Widget, ui::Renderer::measure_callback, &renderer_};
     ui::View details_view_{ui::Surface::Details, ui::Renderer::measure_callback, &renderer_};
     ui::View hover_view_{ui::Surface::Hover, ui::Renderer::measure_callback, &renderer_};
-    ui::View menu_view_{ui::Surface::Menu, ui::Renderer::measure_callback, &renderer_};
-    // The context menu, shared with the Linux host, in a popup at the pointer.
-    // It closes when it loses activation, as TrackPopupMenu's menus do.
-    HWND menu_{};
+    // While the native context menu runs its modal loop; the hover card stays hidden.
     bool menu_open_{};
-    float menu_scale_{1.f};
-    ClayWidgets_Input menu_pointer_{};
     ui::Pixels hover_pixels_;
     bool hovered_{};
     // Settings keep the hover card open beside the taskbar as a live preview.
@@ -164,11 +158,7 @@ class App {
     static void paint_pixels(HWND window, const ui::Pixels& pixels, int y = 0);
     void details_event(HWND window, UINT message, WPARAM w, LPARAM l);
     void show_menu();
-    void close_menu();
-    void render_menu(ClayWidgets_Input input);
-    void menu_event(HWND window, UINT message, WPARAM w, LPARAM l);
     void choose_menu(ui::Frame::MenuChoice choice);
-    static LRESULT CALLBACK menu_proc(HWND window, UINT message, WPARAM w, LPARAM l);
     void open_details(bool settings = false);
     void finish_smoke_test();
     void finish_live_test();

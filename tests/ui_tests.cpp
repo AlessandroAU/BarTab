@@ -83,6 +83,7 @@ void host_feature_tests() {
     floating.set_host_features(features);
     frame = floating.frame(live, neutral(), settings_width, settings_height);
     check(floating.bounds("WidgetWidth").width > 0 && floating.bounds("WidgetHeight").width > 0 &&
+              floating.bounds("WidgetOpacity").width > 0 && taskbar.bounds("WidgetOpacity").width == 0 &&
               floating.bounds("WidgetPosition").width == 0 && floating.bounds("AllTaskbars").width == 0 &&
               !contains(frame.commands, "Taskbar"),
           "A floating widget's page leaves out taskbar placement");

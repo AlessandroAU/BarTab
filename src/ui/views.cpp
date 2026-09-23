@@ -262,6 +262,13 @@ void View::taskbar_settings(Frame& result) {
     }
     result.changed = setting_slider("BarHeight", "Bar thickness", a.bar_height, preference_limits::bar_height,
                                     " px") || result.changed;
+    // A taskbar is the widget's background; a floating widget draws its own.
+    if (!features_.taskbar) {
+        settings_section("Background", true);
+        result.changed = setting_slider("WidgetOpacity", "Opacity", a.widget_opacity,
+                                        preference_limits::widget_opacity, "%") ||
+                         result.changed;
+    }
     ClayWidgets_EndScrollPanel(widgets_.get(), CLAY_ID("TaskbarScroll"));
 }
 void View::hover_settings(Frame& result) {

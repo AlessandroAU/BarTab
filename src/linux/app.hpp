@@ -133,6 +133,8 @@ class App {
     // Undocking returns the widget to the default floating height.
     void reset_floating_height();
     void place_widget();
+    // Moves a dragged widget to follow the pointer at (root_x, root_y).
+    void drag_widget_to(int root_x, int root_y);
     void paint_widget();
 
     void show_hover();

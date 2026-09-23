@@ -14,7 +14,6 @@ App::App(bool smoke, bool live_test, std::shared_ptr<host::MockProviders> mock)
     register_class(popup_class, popup_proc);
     register_class(hover_class, hover_proc);
     register_class(confetti_class, confetti_proc);
-    register_class(menu_class, menu_proc);
     controller_ =
         CreateWindowExW(WS_EX_TOOLWINDOW, controller_class, L"UsageTracker controller", WS_OVERLAPPED, 0, 0,
                         0, 0, nullptr, nullptr, GetModuleHandleW(nullptr), this);
@@ -54,7 +53,6 @@ bool App::reload_ui_font() {
     widget_view_.invalidate_measurements();
     hover_view_.invalidate_measurements();
     details_view_.invalidate_measurements();
-    menu_view_.invalidate_measurements();
     invalidate_widgets();
     if (IsWindowVisible(hover_)) show_hover();
     return true;
@@ -85,8 +83,6 @@ App::~App() {
     Shell_NotifyIconW(NIM_DELETE, &tray_);
     if (popup_)
         DestroyWindow(popup_);
-    if (menu_)
-        DestroyWindow(menu_);
     reset_widget();
     if (hover_)
         DestroyWindow(hover_);

@@ -58,9 +58,6 @@ LRESULT CALLBACK App::widget_proc(HWND window, UINT message, WPARAM w, LPARAM l)
                 app->hide_hover();
             return 0;
         case WM_LBUTTONDOWN:
-            // The widget never takes activation, so a click on it cannot
-            // deactivate an open menu; close it here.
-            app->close_menu();
             app->hide_hover();
             SetCapture(window);
             return 0;
@@ -180,7 +177,8 @@ void App::unpin_hover() {
 void App::show_hover() {
     const auto& anchor_widget = active();
     const auto& widget_bounds = anchor_widget.bounds;
-    if (!preferences_.appearance.hover_enabled || !(hovered_ || hover_pinned_) ||
+    // The context menu suppresses the card, pinned or not, until it closes.
+    if (!preferences_.appearance.hover_enabled || !(hovered_ || hover_pinned_) || menu_open_ ||
         !IsWindowVisible(anchor_widget.window) || widget_bounds.empty())
         return;
     if (!hover_) {
@@ -379,8 +377,6 @@ void App::tick() {
     const bool details_accent_changed = details_view_.set_system_accent(os_accent);
     const bool hover_light_changed = hover_view_.set_system_light(app_light);
     const bool hover_accent_changed = hover_view_.set_system_accent(os_accent);
-    menu_view_.set_system_light(app_light);
-    menu_view_.set_system_accent(os_accent);
     if ((details_light_changed || details_accent_changed) && IsWindowVisible(popup_))
         render_details(details_pointer_);
     if ((hover_light_changed || hover_accent_changed) && IsWindowVisible(hover_))
