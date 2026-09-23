@@ -1,18 +1,20 @@
 #include "windows/app.hpp"
 #include "windows/platform.hpp"
 #include "windows/resource.h"
-#include "windows/startup.hpp"
+#include "host/startup.hpp"
 #include <stdexcept>
 
 namespace usage::windows {
 
-App::App(bool smoke, bool live_test, std::shared_ptr<MockProviders> mock)
-    : mock_(std::move(mock)), animations_allowed_(!smoke), smoke_(smoke), demo_mode_(smoke), live_test_(live_test) {
+App::App(bool smoke, bool live_test, std::shared_ptr<host::MockProviders> mock)
+    : mock_(std::move(mock)), providers_(usage_, mock_, smoke), animations_allowed_(!smoke), smoke_(smoke),
+      demo_mode_(smoke), live_test_(live_test) {
     register_class(controller_class, controller_proc);
     register_class(widget_class, widget_proc);
     register_class(popup_class, popup_proc);
     register_class(hover_class, hover_proc);
     register_class(confetti_class, confetti_proc);
+    register_class(menu_class, menu_proc);
     controller_ =
         CreateWindowExW(WS_EX_TOOLWINDOW, controller_class, L"UsageTracker controller", WS_OVERLAPPED, 0, 0,
                         0, 0, nullptr, nullptr, GetModuleHandleW(nullptr), this);
@@ -25,7 +27,7 @@ App::App(bool smoke, bool live_test, std::shared_ptr<MockProviders> mock)
     usage_.live = !smoke;
     if (!smoke) {
         usage_.codex.installed = false;
-        detect_providers();
+        providers_.detect();
         apply_providers();
     }
     taskbar_created_ = RegisterWindowMessageW(L"TaskbarCreated");
@@ -42,13 +44,17 @@ App::App(bool smoke, bool live_test, std::shared_ptr<MockProviders> mock)
 // the caller: re-entering its render from inside its own frame would nest
 // layouts on one context.
 bool App::reload_ui_font() {
-    const bool regular = renderer_.load_font_data(ui::regular_font, windows_ui_font(false));
-    const bool bold = renderer_.load_font_data(ui::bold_font, windows_ui_font(true));
+    auto regular_font = ui_font(false), bold_font = ui_font(true);
+    const bool regular =
+        renderer_.load_font_data(ui::regular_font, std::move(regular_font.bytes), regular_font.face_index);
+    const bool bold =
+        renderer_.load_font_data(ui::bold_font, std::move(bold_font.bytes), bold_font.face_index);
     if (!regular && !bold)
         return false;
     widget_view_.invalidate_measurements();
     hover_view_.invalidate_measurements();
     details_view_.invalidate_measurements();
+    menu_view_.invalidate_measurements();
     invalidate_widgets();
     if (IsWindowVisible(hover_)) show_hover();
     return true;
@@ -63,7 +69,7 @@ void App::update_system_font() {
 // Smoke tests drive the popup synchronously and read layout back, so they keep
 // the deterministic path; otherwise follow the Windows accessibility switch.
 void App::update_animation_preference() {
-    const bool enabled = animations_allowed_ && client_animations_enabled();
+    const bool enabled = animations_allowed_ && animations_enabled();
     // Logged at start and on change: Windows' "Animation effects" switch turning
     // everything off is the usual answer to "why is nothing animating".
     if (animations_logged_ != static_cast<int>(enabled)) {
@@ -79,6 +85,8 @@ App::~App() {
     Shell_NotifyIconW(NIM_DELETE, &tray_);
     if (popup_)
         DestroyWindow(popup_);
+    if (menu_)
+        DestroyWindow(menu_);
     reset_widget();
     if (hover_)
         DestroyWindow(hover_);
@@ -138,14 +146,9 @@ LRESULT CALLBACK App::controller_proc(HWND window, UINT message, WPARAM w, LPARA
             return 0;
         }
         if (message == WM_TIMER) {
-            const auto codex_before = app->usage_.codex;
-            const auto claude_before = app->usage_.claude;
-            const bool codex_changed = app->codex_ && app->codex_->take(app->usage_.codex);
-            const bool claude_changed = app->claude_ && app->claude_->take(app->usage_.claude);
-            if (codex_changed || claude_changed) {
-                const auto now = std::time(nullptr);
-                if ((codex_changed && !reset_windows(codex_before, app->usage_.codex, now).empty()) ||
-                    (claude_changed && !reset_windows(claude_before, app->usage_.claude, now).empty()))
+            const auto update = app->providers_.poll();
+            if (update.changed) {
+                if (update.reset)
                     app->celebrate();
                 app->update_usage();
                 if (IsWindowVisible(app->popup_))
@@ -222,78 +225,8 @@ void App::update_usage() {
         show_hover();
 }
 
-void App::show_menu() {
-    hide_hover();
-    HMENU menu = CreatePopupMenu();
-    if (!menu)
-        return;
-    const auto startup = startup_state();
-    AppendMenuW(menu, MF_STRING, 4, L"Settings");
-    if (open_mock_panel_)
-        AppendMenuW(menu, MF_STRING, 7, L"Mock providers...");
-    AppendMenuW(menu,
-                MF_STRING | (startup.enabled ? MF_CHECKED : MF_UNCHECKED) |
-                    (startup.error == ERROR_SUCCESS ? 0 : MF_GRAYED),
-                6, L"Start at boot");
-    AppendMenuW(menu, MF_STRING, 3, L"Quit");
-    POINT position{};
-    GetCursorPos(&position);
-    SetForegroundWindow(controller_);
-    const auto selected = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, position.x, position.y, 0,
-                                         controller_, nullptr);
-    DestroyMenu(menu);
-    PostMessageW(controller_, WM_NULL, 0, 0);
-    if (selected == 3)
-        PostQuitMessage(0);
-    if (selected == 4)
-        open_details(true);
-    if (selected == 7)
-        open_mock_panel_();
-    if (selected == 6) {
-        const auto status = set_startup(!startup.enabled);
-        if (status != ERROR_SUCCESS) {
-            wchar_t detail[512]{};
-            FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr,
-                           static_cast<DWORD>(status), 0, detail, static_cast<DWORD>(std::size(detail)),
-                           nullptr);
-            const auto message = L"Could not change Start at boot.\n\n" + std::wstring(detail) +
-                                 L"\nWindows error: " + std::to_wstring(status);
-            MessageBoxW(controller_, message.c_str(), L"UsageTracker", MB_OK | MB_ICONERROR);
-        }
-    }
-}
-
-void App::detect_providers() {
-    if (demo_mode_)
-        return;
-    if (mock_) {
-        for (const auto service : {Service::Codex, Service::Claude}) {
-            auto& account = service == Service::Claude ? usage_.claude : usage_.codex;
-            account.installed = mock_->provider(service).state != MockState::Missing;
-            account.executable_path = account.installed ? mock_path(service) : std::string{};
-            if (!account.installed)
-                account.error.clear();
-        }
-        return;
-    }
-    detect_service(Service::Codex, usage_.codex);
-    detect_service(Service::Claude, usage_.claude);
-}
 void App::apply_providers() {
-    if (demo_mode_)
-        return;
-    if (usage_.codex_enabled) {
-        if (!codex_)
-            codex_ = std::make_unique<UsageReader>(Service::Codex, usage_.codex, mock_);
-        codex_->set_interval(preferences_.codex_interval);
-    } else
-        codex_.reset();
-    if (usage_.claude_enabled) {
-        if (!claude_)
-            claude_ = std::make_unique<UsageReader>(Service::Claude, usage_.claude, mock_);
-        claude_->set_interval(preferences_.claude_interval);
-    } else
-        claude_.reset();
+    providers_.apply(preferences_);
 }
 
 void App::frame() {
@@ -306,11 +239,8 @@ void App::frame() {
 }
 
 void App::mock_changed() {
-    detect_providers();
-    if (codex_)
-        codex_->refresh();
-    if (claude_)
-        claude_->refresh();
+    providers_.detect();
+    providers_.refresh();
     update_usage();
     if (IsWindowVisible(popup_))
         render_details(details_pointer_);

@@ -128,12 +128,9 @@ void App::render_details_frame(ClayWidgets_Input input) {
         return;
     }
     if (frame.refresh) {
-        detect_providers();
+        providers_.detect();
         frame.changed = true;
-        if (codex_)
-            codex_->refresh();
-        if (claude_)
-            claude_->refresh();
+        providers_.refresh();
     }
     if (frame.save) {
         if (!save_settings(details_view_.preferences()))
@@ -287,7 +284,7 @@ void App::open_details(bool settings) {
     settings_mode_ = settings;
     if (settings)
         begin_settings_preview();
-    detect_providers();
+    providers_.detect();
     details_view_.set_surface(settings ? ui::Surface::Settings : ui::Surface::Details);
     details_view_.set_preferences(preferences_);
     SetWindowTextW(popup_, settings ? L"UsageTracker - Settings and usage" : L"UsageTracker - Demo");

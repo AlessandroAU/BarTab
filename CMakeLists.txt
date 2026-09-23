@@ -40,6 +40,16 @@ else()
     add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 endif()
 
+# Layers, each depending only on those above it:
+#   usage_core      portable state, provider protocols and parsers, preferences
+#   usage_ui        Clay layouts and pixel effects (no GPU, no OS)
+#   usage_renderer  raylib + FreeType: layouts to premultiplied pixels
+#   usage_host      services every desktop host shares (provider polling,
+#                   CLI discovery, settings file, process transport), with the
+#                   per-OS parts from src/windows, src/posix, src/linux, src/macos
+#   the app         one native host per desktop: src/windows (Win32) and
+#                   src/linux (X11, including XWayland)
+
 add_library(usage_core STATIC src/core/usage.cpp src/core/codex.cpp src/core/claude.cpp src/core/provider_protocol.cpp
     src/core/mock_provider.cpp)
 target_include_directories(usage_core SYSTEM PRIVATE vendor/nlohmann)
@@ -69,9 +79,118 @@ else()
     target_compile_options(clay_widgets PRIVATE -w)
 endif()
 
-add_library(usage_ui STATIC src/ui/views.cpp src/ui/confetti.cpp)
+add_library(usage_ui STATIC src/ui/views.cpp src/ui/confetti.cpp src/ui/pixels.cpp)
 target_include_directories(usage_ui PUBLIC src)
 target_link_libraries(usage_ui PUBLIC usage_core clay_widgets)
+
+# ---- Renderer: raylib owns one hidden OpenGL context on every platform ----
+if(MSVC)
+    set(vendored_c_quiet /W0 /WX-)
+else()
+    set(vendored_c_quiet -w)
+endif()
+# Keep vendored C warnings separate from the application's strict C++ policy.
+function(add_raylib)
+    set_property(DIRECTORY PROPERTY COMPILE_OPTIONS "")
+    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(CUSTOMIZE_BUILD ON CACHE BOOL "" FORCE)
+    set(SUPPORT_MODULE_RAUDIO OFF CACHE BOOL "" FORCE)
+    set(SUPPORT_MODULE_RMODELS OFF CACHE BOOL "" FORCE)
+    set(SUPPORT_WINMM_HIGHRES_TIMER OFF CACHE BOOL "" FORCE)
+    # The Linux host draws through X11 windows (XWayland on Wayland desktops),
+    # so GLFW's context must be an X11 one too.
+    set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_X11 ON CACHE BOOL "" FORCE)
+    add_subdirectory("${CLAY_WIDGETS_DIR}/subprojects/raylib" "${CMAKE_BINARY_DIR}/raylib" EXCLUDE_FROM_ALL)
+endfunction()
+get_directory_property(app_compile_options COMPILE_OPTIONS)
+add_raylib()
+set_property(DIRECTORY PROPERTY COMPILE_OPTIONS "${app_compile_options}")
+# Hinted glyph rasterization for the raylib backend. Only the modules the
+# backend's freetype-config/ftmodule.h registers are compiled; that directory
+# precedes FreeType's include/ so its module list replaces the default one.
+set(freetype_dir "${CLAY_WIDGETS_DIR}/subprojects/freetype")
+add_library(freetype STATIC
+    "${freetype_dir}/src/base/ftsystem.c"
+    "${freetype_dir}/src/base/ftinit.c"
+    "${freetype_dir}/src/base/ftdebug.c"
+    "${freetype_dir}/src/base/ftbase.c"
+    "${freetype_dir}/src/base/ftbitmap.c"
+    "${freetype_dir}/src/base/ftmm.c"
+    "${freetype_dir}/src/autofit/autofit.c"
+    "${freetype_dir}/src/truetype/truetype.c"
+    "${freetype_dir}/src/cff/cff.c"
+    "${freetype_dir}/src/sfnt/sfnt.c"
+    "${freetype_dir}/src/psaux/psaux.c"
+    "${freetype_dir}/src/psnames/psnames.c"
+    "${freetype_dir}/src/pshinter/pshinter.c"
+    "${freetype_dir}/src/smooth/smooth.c"
+    "${freetype_dir}/src/gzip/ftgzip.c"
+)
+target_include_directories(freetype BEFORE PRIVATE "${CLAY_WIDGETS_DIR}/backends/raylib/freetype-config")
+target_include_directories(freetype SYSTEM PUBLIC "${freetype_dir}/include")
+target_compile_definitions(freetype PRIVATE FT2_BUILD_LIBRARY _CRT_SECURE_NO_WARNINGS)
+target_compile_options(freetype PRIVATE ${vendored_c_quiet})
+if(NOT MSVC)
+    # GCC repeats FreeType's warnings at link time under LTO, where -w no
+    # longer applies; they are upstream's, so keep FreeType out of LTO there.
+    set_target_properties(freetype PROPERTIES INTERPROCEDURAL_OPTIMIZATION_RELEASE OFF
+                                              INTERPROCEDURAL_OPTIMIZATION_MINSIZEREL OFF)
+endif()
+add_library(usage_renderer STATIC src/ui/raylib_renderer.cpp)
+target_compile_definitions(usage_renderer PRIVATE CLAY_WIDGETS_FREETYPE)
+if(WIN32)
+    # raylib's C API name collides with user32's CloseWindow in a native host.
+    target_compile_definitions(raylib PRIVATE CloseWindow=UsageTrackerRaylibCloseWindow)
+    target_compile_definitions(usage_renderer PRIVATE CloseWindow=UsageTrackerRaylibCloseWindow)
+endif()
+target_include_directories(usage_renderer SYSTEM PRIVATE "${CLAY_WIDGETS_DIR}")
+target_link_libraries(usage_renderer PUBLIC usage_ui PRIVATE raylib freetype)
+
+# ---- Host services shared by every desktop host ----
+add_library(usage_host STATIC
+    src/host/log.cpp
+    src/host/discovery.cpp
+    src/host/service_discovery.cpp
+    src/host/settings_store.cpp
+    src/host/providers.cpp
+)
+target_link_libraries(usage_host PUBLIC usage_core)
+if(WIN32)
+    target_sources(usage_host PRIVATE
+        src/windows/platform.cpp
+        src/windows/process_transport.cpp
+        src/windows/locations.cpp
+        src/windows/startup.cpp
+    )
+    target_compile_definitions(usage_host PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
+    target_link_libraries(usage_host PUBLIC user32 gdi32 dwmapi advapi32)
+else()
+    target_sources(usage_host PRIVATE src/posix/process_transport.cpp src/posix/locations.cpp)
+    find_package(Threads REQUIRED)
+    target_link_libraries(usage_host PUBLIC Threads::Threads)
+    if(APPLE)
+        target_sources(usage_host PRIVATE src/macos/platform.cpp src/macos/startup.cpp)
+    else()
+        target_sources(usage_host PRIVATE src/linux/platform.cpp src/linux/startup.cpp)
+        find_package(Fontconfig REQUIRED)
+        target_link_libraries(usage_host PRIVATE Fontconfig::Fontconfig)
+        # The desktop portal and GSettings report dark mode, the accent color,
+        # reduced motion and the UI font. Without GIO the host still runs, with
+        # a dark theme, the default accent and fontconfig's sans-serif.
+        find_package(PkgConfig)
+        if(PkgConfig_FOUND)
+            pkg_check_modules(GIO IMPORTED_TARGET gio-2.0)
+        endif()
+        if(GIO_FOUND)
+            target_link_libraries(usage_host PRIVATE PkgConfig::GIO)
+            target_compile_definitions(usage_host PRIVATE USAGETRACKER_HAVE_GIO)
+        else()
+            message(STATUS "GIO not found: the Linux host will not follow the desktop's theme, accent or font.")
+        endif()
+    endif()
+endif()
 
 include(CTest)
 if(BUILD_TESTING)
@@ -110,117 +229,99 @@ if(BUILD_TESTING)
     add_executable(usage_core_tests tests/core_tests.cpp)
     target_link_libraries(usage_core_tests PRIVATE usage_core)
     add_test(NAME usage_core COMMAND usage_core_tests)
+    # Host services, on every platform.
+    add_executable(process_transport_tests tests/process_transport_tests.cpp)
+    target_link_libraries(process_transport_tests PRIVATE usage_host)
+    add_test(NAME process_transport COMMAND process_transport_tests)
+    set_tests_properties(process_transport PROPERTIES TIMEOUT 15)
+    add_executable(settings_store_tests tests/settings_store_tests.cpp)
+    target_link_libraries(settings_store_tests PRIVATE usage_host)
+    add_test(NAME settings_store COMMAND settings_store_tests)
+    add_executable(discovery_tests tests/discovery_tests.cpp)
+    target_link_libraries(discovery_tests PRIVATE usage_host)
+    add_test(NAME executable_discovery COMMAND discovery_tests)
+    add_executable(host_tests tests/host_tests.cpp)
+    target_link_libraries(host_tests PRIVATE usage_host usage_ui)
+    add_test(NAME host_services COMMAND host_tests)
+    set_tests_properties(host_services PROPERTIES TIMEOUT 15)
+    add_executable(startup_tests tests/startup_tests.cpp)
+    target_link_libraries(startup_tests PRIVATE usage_host)
+    add_test(NAME startup_toggle COMMAND startup_tests)
 endif()
 
+# Regenerates the README images offscreen. Not part of the test suite: it needs
+# a GPU context and writes into the source tree.
+add_executable(screenshots src/tools/screenshots.cpp)
+target_link_libraries(screenshots PRIVATE usage_renderer usage_host)
+add_custom_target(docs-screenshots
+    COMMAND screenshots "${CMAKE_CURRENT_SOURCE_DIR}/docs/images"
+    DEPENDS screenshots
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    COMMENT "Rendering README screenshots")
+
+# ---- The desktop app: one native host per platform ----
+set(app_targets)
 if(WIN32)
     enable_language(RC)
     if(NOT MSVC)
-        message(FATAL_ERROR "The Windows host currently requires MSVC and the Windows SDK. The portable core supports GCC/Clang on Linux.")
+        message(FATAL_ERROR "The Windows host requires MSVC and the Windows SDK.")
     endif()
-    # Keep vendored C warnings separate from the application's strict C++ policy.
-    function(add_raylib)
-        set_property(DIRECTORY PROPERTY COMPILE_OPTIONS "")
-        set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-        set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-        set(CUSTOMIZE_BUILD ON CACHE BOOL "" FORCE)
-        set(SUPPORT_MODULE_RAUDIO OFF CACHE BOOL "" FORCE)
-        set(SUPPORT_MODULE_RMODELS OFF CACHE BOOL "" FORCE)
-        set(SUPPORT_WINMM_HIGHRES_TIMER OFF CACHE BOOL "" FORCE)
-        add_subdirectory("${CLAY_WIDGETS_DIR}/subprojects/raylib" "${CMAKE_BINARY_DIR}/raylib" EXCLUDE_FROM_ALL)
-    endfunction()
-    get_directory_property(app_compile_options COMPILE_OPTIONS)
-    add_raylib()
-    set_property(DIRECTORY PROPERTY COMPILE_OPTIONS "${app_compile_options}")
-    # Hinted glyph rasterization for the raylib backend. Only the modules the
-    # backend's freetype-config/ftmodule.h registers are compiled; that directory
-    # precedes FreeType's include/ so its module list replaces the default one.
-    set(freetype_dir "${CLAY_WIDGETS_DIR}/subprojects/freetype")
-    add_library(freetype STATIC
-        "${freetype_dir}/src/base/ftsystem.c"
-        "${freetype_dir}/src/base/ftinit.c"
-        "${freetype_dir}/src/base/ftdebug.c"
-        "${freetype_dir}/src/base/ftbase.c"
-        "${freetype_dir}/src/base/ftbitmap.c"
-        "${freetype_dir}/src/base/ftmm.c"
-        "${freetype_dir}/src/autofit/autofit.c"
-        "${freetype_dir}/src/truetype/truetype.c"
-        "${freetype_dir}/src/cff/cff.c"
-        "${freetype_dir}/src/sfnt/sfnt.c"
-        "${freetype_dir}/src/psaux/psaux.c"
-        "${freetype_dir}/src/psnames/psnames.c"
-        "${freetype_dir}/src/pshinter/pshinter.c"
-        "${freetype_dir}/src/smooth/smooth.c"
-        "${freetype_dir}/src/gzip/ftgzip.c"
-    )
-    target_include_directories(freetype BEFORE PRIVATE "${CLAY_WIDGETS_DIR}/backends/raylib/freetype-config")
-    target_include_directories(freetype SYSTEM PUBLIC "${freetype_dir}/include")
-    target_compile_definitions(freetype PRIVATE FT2_BUILD_LIBRARY _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(freetype PRIVATE /W0 /WX-)
-    add_library(usage_renderer STATIC src/ui/raylib_renderer.cpp)
-    # raylib's C API name collides with user32's CloseWindow in a native host.
-    target_compile_definitions(raylib PRIVATE CloseWindow=UsageTrackerRaylibCloseWindow)
-    target_compile_definitions(usage_renderer PRIVATE CloseWindow=UsageTrackerRaylibCloseWindow CLAY_WIDGETS_FREETYPE)
-    target_include_directories(usage_renderer SYSTEM PRIVATE "${CLAY_WIDGETS_DIR}")
-    target_link_libraries(usage_renderer PUBLIC usage_ui PRIVATE raylib freetype)
     # Everything but the entry point, shared by the app and its debug build.
-    add_library(usage_host OBJECT
+    add_library(usage_windows OBJECT
         src/windows/app.cpp
-        src/windows/platform.cpp
         src/windows/settings.cpp
-        src/windows/settings_store.cpp
-        src/windows/providers.cpp
-        src/windows/process_transport.cpp
-        src/windows/service_discovery.cpp
-        src/windows/discovery.cpp
-        src/windows/startup.cpp
         src/windows/widget.cpp
         src/windows/frame_clock.cpp
         src/windows/popup.cpp
+        src/windows/menu.cpp
         src/windows/smoke_test.cpp
         src/windows/taskbar.cpp
     )
-    target_compile_definitions(usage_host PUBLIC UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
-    target_include_directories(usage_host PUBLIC assets)
-    target_link_libraries(usage_host PUBLIC usage_renderer user32 gdi32 shell32 ole32 oleaut32 uiautomationcore dwmapi advapi32)
+    target_compile_definitions(usage_windows PUBLIC UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
+    target_include_directories(usage_windows PUBLIC assets)
+    target_link_libraries(usage_windows PUBLIC usage_renderer usage_host shell32 ole32 oleaut32 uiautomationcore shcore)
     add_executable(UsageTracker WIN32 src/windows/resources.rc src/windows/main.cpp)
-    target_link_libraries(UsageTracker PRIVATE usage_host)
+    target_link_libraries(UsageTracker PRIVATE usage_windows)
     target_link_options(UsageTracker PRIVATE "/MANIFEST:EMBED" "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/app.manifest")
     # The same app with mock provider endpoints and a control panel to set
     # them, for trying every provider combination without real accounts.
     add_executable(UsageTrackerDebug WIN32 src/windows/resources.rc src/windows/main.cpp src/windows/mock_panel.cpp)
     target_compile_definitions(UsageTrackerDebug PRIVATE USAGETRACKER_MOCK)
-    target_link_libraries(UsageTrackerDebug PRIVATE usage_host comctl32)
+    target_link_libraries(UsageTrackerDebug PRIVATE usage_windows comctl32)
     target_link_options(UsageTrackerDebug PRIVATE "/MANIFEST:EMBED" "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/app.manifest")
-
-    # Regenerates the README images offscreen. Not part of the test suite: it
-    # needs a GPU context and writes into the source tree.
-    add_executable(screenshots src/tools/screenshots.cpp src/windows/platform.cpp)
-    target_link_libraries(screenshots PRIVATE usage_renderer user32 gdi32 dwmapi advapi32)
-    target_compile_definitions(screenshots PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-    add_custom_target(docs-screenshots
-        COMMAND screenshots "${CMAKE_CURRENT_SOURCE_DIR}/docs/images"
-        DEPENDS screenshots
-        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-        COMMENT "Rendering README screenshots")
-    if(BUILD_TESTING)
-        add_executable(process_transport_tests tests/process_transport_tests.cpp src/windows/process_transport.cpp)
-        target_include_directories(process_transport_tests PRIVATE src)
-        target_compile_definitions(process_transport_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-        add_test(NAME process_transport COMMAND process_transport_tests)
-        set_tests_properties(process_transport PROPERTIES TIMEOUT 15)
-        add_executable(settings_store_tests tests/settings_store_tests.cpp src/windows/settings_store.cpp)
-        target_include_directories(settings_store_tests PRIVATE src)
-        target_compile_definitions(settings_store_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-        add_test(NAME settings_store COMMAND settings_store_tests)
-        add_executable(discovery_tests tests/discovery_tests.cpp src/windows/discovery.cpp)
-        target_include_directories(discovery_tests PRIVATE src)
-        add_test(NAME executable_discovery COMMAND discovery_tests)
-        add_executable(startup_tests tests/startup_tests.cpp src/windows/startup.cpp)
-        target_include_directories(startup_tests PRIVATE src)
-        target_link_libraries(startup_tests PRIVATE advapi32)
-        add_test(NAME startup_toggle COMMAND startup_tests)
+    list(APPEND app_targets UsageTracker UsageTrackerDebug)
+elseif(APPLE)
+    message(STATUS "macOS: building the portable libraries, host services and tests. The menu-bar host is not implemented yet.")
+else()
+    find_package(X11 REQUIRED)
+    if(NOT TARGET X11::Xext OR NOT TARGET X11::Xrandr)
+        message(FATAL_ERROR "The Linux host needs the Xext and Xrandr development files (libxext-dev, libxrandr-dev).")
     endif()
-    install(TARGETS UsageTracker UsageTrackerDebug RUNTIME DESTINATION .)
+    # Everything but the entry point, shared by the app and its debug build.
+    add_library(usage_linux OBJECT
+        src/linux/app.cpp
+        src/linux/x11.cpp
+    )
+    target_link_libraries(usage_linux PUBLIC usage_renderer usage_host X11::X11 X11::Xext X11::Xrandr)
+    add_executable(UsageTracker src/linux/main.cpp)
+    target_link_libraries(UsageTracker PRIVATE usage_linux)
+    # The same app with mock provider endpoints; middle-click cycles scenarios.
+    add_executable(UsageTrackerDebug src/linux/main.cpp)
+    target_compile_definitions(UsageTrackerDebug PRIVATE USAGETRACKER_MOCK)
+    target_link_libraries(UsageTrackerDebug PRIVATE usage_linux)
+    list(APPEND app_targets UsageTracker UsageTrackerDebug)
+    if(BUILD_TESTING)
+        # The live smoke test needs an X server; run it headless when Xvfb is available.
+        find_program(XVFB_RUN xvfb-run)
+        if(XVFB_RUN)
+            add_test(NAME linux_smoke COMMAND "${XVFB_RUN}" -a "$<TARGET_FILE:UsageTracker>" --smoke-test)
+            set_tests_properties(linux_smoke PROPERTIES TIMEOUT 60)
+        endif()
+    endif()
+endif()
+
+if(app_targets)
+    install(TARGETS ${app_targets} RUNTIME DESTINATION .)
     install(FILES "${CLAY_WIDGETS_DIR}/subprojects/clay/LICENSE.md" DESTINATION licenses RENAME clay.txt)
     install(FILES "${CLAY_WIDGETS_DIR}/LICENSE" DESTINATION licenses RENAME clay-widgets.txt)
     install(FILES "${CLAY_WIDGETS_DIR}/subprojects/raylib/LICENSE" DESTINATION licenses RENAME raylib.txt)
@@ -229,6 +330,4 @@ if(WIN32)
     install(FILES vendor/fonts/LICENSE.txt DESTINATION licenses RENAME roboto.txt)
     install(FILES vendor/README.md DESTINATION licenses RENAME dependencies.md)
     install(FILES vendor/nlohmann/LICENSE.MIT DESTINATION licenses RENAME nlohmann-json.txt)
-else()
-    message(STATUS "Building portable core and tests. A Linux desktop host is not implemented yet.")
 endif()

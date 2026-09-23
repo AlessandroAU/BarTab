@@ -1,9 +1,9 @@
-#include "windows/process_transport.hpp"
+#include "host/process_transport.hpp"
 #include <windows.h>
 #include <mutex>
 #include <stdexcept>
 
-namespace usage::windows {
+namespace usage::host {
 namespace {
 struct Handle {
     HANDLE value{};
@@ -15,14 +15,47 @@ struct Handle {
     Handle(const Handle&) = delete;
     Handle& operator=(const Handle&) = delete;
 };
+std::wstring widen(const std::string& value) {
+    const int count =
+        MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0);
+    std::wstring result(static_cast<std::size_t>(count > 0 ? count : 0), L'\0');
+    if (count > 0)
+        MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), result.data(), count);
+    return result;
+}
+// Quotes one argument so the child's C runtime parses it back unchanged:
+// backslashes are literal except before a quote, where they double.
+std::wstring quote(const std::wstring& argument) {
+    if (!argument.empty() && argument.find_first_of(L" \t\n\v\"") == std::wstring::npos)
+        return argument;
+    std::wstring result = L"\"";
+    for (auto it = argument.begin();; ++it) {
+        std::size_t backslashes = 0;
+        while (it != argument.end() && *it == L'\\') {
+            ++it;
+            ++backslashes;
+        }
+        if (it == argument.end()) {
+            result.append(backslashes * 2, L'\\');
+            break;
+        }
+        if (*it == L'"')
+            result.append(backslashes * 2 + 1, L'\\');
+        else
+            result.append(backslashes, L'\\');
+        result.push_back(*it);
+    }
+    result.push_back(L'"');
+    return result;
+}
 } // namespace
 struct ProcessTransport::Impl {
     Handle input_read, input_write, output_read, output_write, null_output, process, thread, job;
     const std::atomic<bool>& stop;
     std::chrono::steady_clock::time_point deadline;
     std::string buffer;
-    Impl(const std::filesystem::path& exe, const std::wstring& arguments, const std::atomic<bool>& stopped,
-         std::chrono::milliseconds timeout)
+    Impl(const std::filesystem::path& exe, const std::vector<std::string>& arguments,
+         const std::atomic<bool>& stopped, std::chrono::milliseconds timeout)
         : stop(stopped) {
         static std::mutex spawn_mutex;
         std::unique_lock<std::mutex> spawn_lock(spawn_mutex);
@@ -41,7 +74,9 @@ struct ProcessTransport::Impl {
         startup.hStdOutput = output_write.value;
         startup.hStdError = null_output.value;
         PROCESS_INFORMATION info{};
-        std::wstring command = L"\"" + exe.wstring() + L"\"" + arguments;
+        std::wstring command = L"\"" + exe.wstring() + L"\"";
+        for (const auto& argument : arguments)
+            command += L" " + quote(widen(argument));
         job.value = CreateJobObjectW(nullptr, nullptr);
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -66,8 +101,9 @@ struct ProcessTransport::Impl {
         deadline = std::chrono::steady_clock::now() + timeout;
     }
 };
-ProcessTransport::ProcessTransport(const std::filesystem::path& executable, const std::wstring& arguments,
-                                   const std::atomic<bool>& stop, std::chrono::milliseconds timeout)
+ProcessTransport::ProcessTransport(const std::filesystem::path& executable,
+                                   const std::vector<std::string>& arguments, const std::atomic<bool>& stop,
+                                   std::chrono::milliseconds timeout)
     : impl_(std::make_unique<Impl>(executable, arguments, stop, timeout)) {}
 ProcessTransport::~ProcessTransport() = default;
 void ProcessTransport::send(std::string_view message) {
@@ -107,4 +143,4 @@ std::string ProcessTransport::read_line() {
     }
     throw std::runtime_error("Usage request timed out");
 }
-} // namespace usage::windows
+} // namespace usage::host

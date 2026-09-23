@@ -1,5 +1,5 @@
 #pragma once
-#include "windows/providers.hpp"
+#include "host/providers.hpp"
 #include <windows.h>
 #include <functional>
 #include <vector>
@@ -11,7 +11,7 @@ class MockPanel {
   public:
     // `celebrate` plays the reset animation when a simulated reset would not
     // trigger it on its own.
-    MockPanel(std::shared_ptr<MockProviders> providers, std::function<void()> changed,
+    MockPanel(std::shared_ptr<host::MockProviders> providers, std::function<void()> changed,
               std::function<void()> celebrate);
     ~MockPanel();
     MockPanel(const MockPanel&) = delete;
@@ -32,7 +32,7 @@ class MockPanel {
         HWND state{}, plan{}, model_name{}, credits{}, earned_resets{};
         AllowanceControls allowances[3];
     };
-    std::shared_ptr<MockProviders> providers_;
+    std::shared_ptr<host::MockProviders> providers_;
     std::function<void()> changed_, celebrate_;
     HWND window_{}, preset_{};
     HFONT font_{};

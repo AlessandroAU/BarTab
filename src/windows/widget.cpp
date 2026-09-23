@@ -58,6 +58,9 @@ LRESULT CALLBACK App::widget_proc(HWND window, UINT message, WPARAM w, LPARAM l)
                 app->hide_hover();
             return 0;
         case WM_LBUTTONDOWN:
+            // The widget never takes activation, so a click on it cannot
+            // deactivate an open menu; close it here.
+            app->close_menu();
             app->hide_hover();
             SetCapture(window);
             return 0;
@@ -211,7 +214,7 @@ void App::show_hover() {
     if (opening) {
         // Grow away from the taskbar: upward when the card sits above the widget.
         hover_grows_up_ = y + height / 2 < widget_bounds.y + widget_bounds.height / 2;
-        const bool animate = animations_allowed_ && client_animations_enabled();
+        const bool animate = animations_allowed_ && animations_enabled();
         hover_progress_ = animate ? 0.f : 1.f;
         hover_opened_ = std::chrono::steady_clock::now();
         if (animate)
@@ -371,11 +374,13 @@ void App::hide_widget() {
 
 void App::tick() {
     const bool app_light = apps_light_theme();
-    const auto os_accent = windows_accent();
+    const auto os_accent = system_accent();
     const bool details_light_changed = details_view_.set_system_light(app_light);
     const bool details_accent_changed = details_view_.set_system_accent(os_accent);
     const bool hover_light_changed = hover_view_.set_system_light(app_light);
     const bool hover_accent_changed = hover_view_.set_system_accent(os_accent);
+    menu_view_.set_system_light(app_light);
+    menu_view_.set_system_accent(os_accent);
     if ((details_light_changed || details_accent_changed) && IsWindowVisible(popup_))
         render_details(details_pointer_);
     if ((hover_light_changed || hover_accent_changed) && IsWindowVisible(hover_))
@@ -487,7 +492,7 @@ LRESULT CALLBACK App::confetti_proc(HWND window, UINT message, WPARAM w, LPARAM 
 // adds to it in the same overlay.
 void App::celebrate() {
     const auto& widget = active();
-    if (!animations_allowed_ || !client_animations_enabled() || !widget.window || !IsWindowVisible(widget.window) ||
+    if (!animations_allowed_ || !animations_enabled() || !widget.window || !IsWindowVisible(widget.window) ||
         widget.bounds.empty())
         return;
     const UINT dpi = GetDpiForWindow(widget.window);

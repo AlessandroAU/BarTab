@@ -41,10 +41,11 @@ ProtocolReply claude_response(const Json& message) {
     return {{}, parse_claude_limits(response.at("response").dump())};
 }
 } // namespace
-std::wstring ProviderProtocol::arguments() const {
-    return service_ == Service::Claude ? L" --print --input-format stream-json --output-format stream-json "
-                                         L"--verbose --no-session-persistence --safe-mode --strict-mcp-config"
-                                       : L" app-server --listen stdio://";
+std::vector<std::string> ProviderProtocol::arguments() const {
+    if (service_ == Service::Claude)
+        return {"--print",   "--input-format",           "stream-json", "--output-format",    "stream-json",
+                "--verbose", "--no-session-persistence", "--safe-mode", "--strict-mcp-config"};
+    return {"app-server", "--listen", "stdio://"};
 }
 std::string ProviderProtocol::initialize() const {
     if (service_ == Service::Claude)

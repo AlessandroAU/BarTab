@@ -21,19 +21,37 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     auto arguments = CommandLineToArgvW(GetCommandLineW(), &argument_count);
     bool smoke = false;
     bool live_test = false;
+    bool reset = false;
     for (int i = 1; i < argument_count; ++i)
         if (std::wstring(arguments[i]) == L"--smoke-test")
             smoke = true;
     for (int i = 1; i < argument_count; ++i)
         if (std::wstring(arguments[i]) == L"--live-smoke-test")
             live_test = true;
+    for (int i = 1; i < argument_count; ++i)
+        if (std::wstring(arguments[i]) == L"--reset")
+            reset = true;
     LocalFree(arguments);
     int result = 1;
     try {
 #ifdef USAGETRACKER_MOCK
+        constexpr bool mock_build = true;
+#else
+        constexpr bool mock_build = false;
+#endif
+        // Start over from the default settings.
+        if (reset && !smoke) {
+            std::error_code error;
+            std::filesystem::remove(usage::windows::App::settings_file(mock_build), error);
+            usage::windows::log(error ? L"Could not remove the settings file."
+                                      : L"Settings reset from the command line.");
+        }
+#ifdef USAGETRACKER_MOCK
         using namespace usage::windows;
         // Smoke tests keep their fixed demo data; the panel drives everything else.
-        auto mock = smoke ? nullptr : std::make_shared<MockProviders>(usage::mock_presets().front().scenario);
+        auto mock =
+            smoke ? nullptr
+                  : std::make_shared<usage::host::MockProviders>(usage::mock_presets().front().scenario);
         App app(smoke, live_test, mock);
         std::unique_ptr<MockPanel> panel;
         if (mock) {

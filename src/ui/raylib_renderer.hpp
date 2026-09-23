@@ -1,17 +1,13 @@
 #pragma once
 #include "ui/views.hpp"
 #include "ui/confetti.hpp"
+#include "ui/pixels.hpp"
 #include <cstdint>
 #include <memory>
 #include <vector>
 #include <filesystem>
 
 namespace usage::ui {
-struct Pixels {
-    int width{}, height{};
-    // Top-down, premultiplied BGRA for the Windows compositor.
-    std::vector<std::uint32_t> data;
-};
 class Renderer {
   public:
     Renderer();
@@ -23,7 +19,10 @@ class Renderer {
     // pixel size and the view's text gamma (View::text_gamma) picks its curve.
     // One call for both so a surface cannot render with the other's atlas.
     void set_surface(float scale, float text_gamma);
-    bool load_font_data(uint16_t id, std::vector<unsigned char> bytes);
+    // `face_index` picks a face in a collection or a variable font's named
+    // instance, encoded as FreeType and fontconfig do. Returns whether the font
+    // for `id` changed.
+    bool load_font_data(uint16_t id, std::vector<unsigned char> bytes, long face_index = 0);
     bool load_font(uint16_t id, const std::filesystem::path& path);
     Pixels render(Clay_RenderCommandArray, int width, int height, float scale, bool hit_background);
     // Draws every piece as a rotated rectangle; piece positions are DIPs

@@ -2,7 +2,7 @@
 #include "windows/taskbar.hpp"
 #include "windows/frame_clock.hpp"
 #include "core/settings_edit.hpp"
-#include "windows/providers.hpp"
+#include "host/providers.hpp"
 #include "ui/raylib_renderer.hpp"
 #include <shellapi.h>
 #include <filesystem>
@@ -16,6 +16,7 @@ inline constexpr wchar_t controller_class[] = L"UsageTracker.Controller.Cpp";
 inline constexpr wchar_t popup_class[] = L"UsageTracker.Popup.Cpp";
 inline constexpr wchar_t hover_class[] = L"UsageTracker.Hover.Cpp";
 inline constexpr wchar_t confetti_class[] = L"UsageTracker.Confetti.Cpp";
+inline constexpr wchar_t menu_class[] = L"UsageTracker.Menu.Cpp";
 
 // A widget embedded in one taskbar, with its screen bounds.
 struct TaskbarWidget {
@@ -27,11 +28,14 @@ class App {
   public:
     // With `mock`, the providers are the debug build's mock endpoints rather
     // than the installed CLIs, and settings go to a file of their own.
-    explicit App(bool smoke, bool live_test = false, std::shared_ptr<MockProviders> mock = nullptr);
+    explicit App(bool smoke, bool live_test = false, std::shared_ptr<host::MockProviders> mock = nullptr);
     ~App();
     App(const App&) = delete;
     App& operator=(const App&) = delete;
     int run();
+    // Where settings are saved; the debug build keeps its own file. --reset
+    // deletes it before starting, so the app starts from the defaults.
+    static std::filesystem::path settings_file(bool mock);
     // The mock scenario changed: detect and read the providers again.
     void mock_changed();
     // Adds a tray menu entry that reopens the debug build's mock panel.
@@ -43,13 +47,20 @@ class App {
 
   private:
     Usage usage_;
-    std::unique_ptr<UsageReader> codex_, claude_;
-    std::shared_ptr<MockProviders> mock_;
+    std::shared_ptr<host::MockProviders> mock_;
+    host::ProviderSession providers_;
     std::function<void()> open_mock_panel_;
     ui::Renderer renderer_;
     ui::View widget_view_{ui::Surface::Widget, ui::Renderer::measure_callback, &renderer_};
     ui::View details_view_{ui::Surface::Details, ui::Renderer::measure_callback, &renderer_};
     ui::View hover_view_{ui::Surface::Hover, ui::Renderer::measure_callback, &renderer_};
+    ui::View menu_view_{ui::Surface::Menu, ui::Renderer::measure_callback, &renderer_};
+    // The context menu, shared with the Linux host, in a popup at the pointer.
+    // It closes when it loses activation, as TrackPopupMenu's menus do.
+    HWND menu_{};
+    bool menu_open_{};
+    float menu_scale_{1.f};
+    ClayWidgets_Input menu_pointer_{};
     ui::Pixels hover_pixels_;
     bool hovered_{};
     // Settings keep the hover card open beside the taskbar as a live preview.
@@ -107,7 +118,6 @@ class App {
     void apply_view_preferences();
     void apply_providers();
     void apply_preferences(Preferences value);
-    void detect_providers();
 
     void register_class(const wchar_t* name, WNDPROC procedure);
     static App* instance(HWND window, UINT message, LPARAM parameter);
@@ -154,6 +164,11 @@ class App {
     static void paint_pixels(HWND window, const ui::Pixels& pixels, int y = 0);
     void details_event(HWND window, UINT message, WPARAM w, LPARAM l);
     void show_menu();
+    void close_menu();
+    void render_menu(ClayWidgets_Input input);
+    void menu_event(HWND window, UINT message, WPARAM w, LPARAM l);
+    void choose_menu(ui::Frame::MenuChoice choice);
+    static LRESULT CALLBACK menu_proc(HWND window, UINT message, WPARAM w, LPARAM l);
     void open_details(bool settings = false);
     void finish_smoke_test();
     void finish_live_test();

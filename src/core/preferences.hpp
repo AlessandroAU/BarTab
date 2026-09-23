@@ -13,6 +13,7 @@ namespace preference_limits {
 // Text sizes are relative to each surface's base scale below, in 5% steps.
 inline constexpr SettingRange text_percent{65, 200, 5};
 inline constexpr SettingRange widget_width{100, 400, 10};
+inline constexpr SettingRange widget_height{16, 80, 1};
 inline constexpr SettingRange hover_opacity{50, 100, 1};
 inline constexpr SettingRange bar_height{3, 9, 1};
 inline constexpr SettingRange position{0, 100, 1};
@@ -39,6 +40,9 @@ struct Appearance {
     bool bold_taskbar{true}, bold_hover{true}, bold_settings{false};
     // A widget on every monitor's taskbar, not only the primary one.
     bool all_taskbars{false};
+    // The floating widget's height, so it can be sized to fit a desktop panel.
+    // A taskbar host takes the taskbar's height instead.
+    int widget_height{38};
     // The effective scales the layouts use.
     int taskbar_text_scale() const {
         return (text_percent * taskbar_text_base + 50) / 100;
@@ -47,9 +51,9 @@ struct Appearance {
         return (hover_text_percent * hover_text_base + 50) / 100;
     }
     auto values() const {
-        return std::tie(text_percent, hover_text_percent, widget_width, hover_opacity,
-                        bar_height, position, show_resets, hover_enabled, twelve_hour_time, bold_taskbar,
-                        bold_hover, bold_settings, all_taskbars);
+        return std::tie(text_percent, hover_text_percent, widget_width, hover_opacity, bar_height, position,
+                        show_resets, hover_enabled, twelve_hour_time, bold_taskbar, bold_hover, bold_settings,
+                        all_taskbars, widget_height);
     }
     bool operator==(const Appearance& other) const {
         return values() == other.values();
@@ -58,6 +62,7 @@ struct Appearance {
         text_percent = preference_limits::text_percent.clamp(text_percent);
         hover_text_percent = preference_limits::text_percent.clamp(hover_text_percent);
         widget_width = preference_limits::widget_width.clamp(widget_width);
+        widget_height = preference_limits::widget_height.clamp(widget_height);
         hover_opacity = preference_limits::hover_opacity.clamp(hover_opacity);
         bar_height = preference_limits::bar_height.clamp(bar_height);
         position = preference_limits::position.clamp(position);

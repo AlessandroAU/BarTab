@@ -1,17 +1,17 @@
 #pragma once
-#include "core/usage.hpp"
-#include <filesystem>
+#include "host/platform.hpp"
 #include <string>
 
 namespace usage::windows {
-std::filesystem::path executable_directory();
+using host::animations_enabled;
+using host::apps_light_theme;
+using host::executable_directory;
+using host::system_accent;
+using host::system_light_theme;
+using host::ui_font;
+// The Win32 host builds its messages as UTF-16; this converts and appends them
+// to the shared log.
 void log(const std::wstring& message);
-bool system_light_theme();
-bool apps_light_theme();
-// The "Animation effects" accessibility switch; false asks for reduced motion.
-bool client_animations_enabled();
-Color windows_accent();
-// The Windows UI font as raw TTF bytes. `bold` resolves the same family's
-// bold face rather than emboldening the regular one.
-std::vector<unsigned char> windows_ui_font(bool bold = false);
+std::string utf8(const std::wstring& value);
+std::wstring widen(const std::string& utf8);
 } // namespace usage::windows

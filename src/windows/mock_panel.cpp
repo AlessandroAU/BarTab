@@ -63,7 +63,7 @@ std::wstring duration(int minutes) {
 }
 } // namespace
 
-MockPanel::MockPanel(std::shared_ptr<MockProviders> providers, std::function<void()> changed,
+MockPanel::MockPanel(std::shared_ptr<host::MockProviders> providers, std::function<void()> changed,
                      std::function<void()> celebrate)
     : providers_(std::move(providers)), changed_(std::move(changed)), celebrate_(std::move(celebrate)) {
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_BAR_CLASSES | ICC_STANDARD_CLASSES};

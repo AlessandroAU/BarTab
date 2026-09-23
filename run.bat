@@ -12,7 +12,7 @@ if not exist "%widget_exe%" (
 taskkill /F /IM UsageTracker.exe >nul 2>&1
 rem No existing process is normal; clear taskkill's error before checking start.
 cmd /c exit 0
-start "" /D "%~dp0bin" "%widget_exe%"
+start "" /D "%~dp0bin" "%widget_exe%" %*
 if errorlevel 1 (
     echo Failed to launch UsageTracker.
     pause

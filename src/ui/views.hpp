@@ -9,7 +9,8 @@
 
 namespace usage::ui {
 // The width preference is the widget's width. Text keeps its size and the bars
-// absorb what is left.
+// absorb what is left. The height preference applies to floating widgets; a
+// taskbar host lays the widget out at the taskbar's widget_height.
 Clay_Dimensions widget_size(const Appearance& appearance);
 // The widget at its preferred width, or narrowed down to the minimum width when a
 // free taskbar gap is tighter; empty when nothing fits.
@@ -17,7 +18,7 @@ Rect place_widget(const Appearance& appearance, Rect panel, const std::vector<Re
 // `text_scale` is the hover card's effective text scale, Appearance::hover_text_scale().
 Clay_Dimensions hover_size(const Usage& data, int text_scale);
 
-enum class Surface { Widget, Details, Hover, Settings };
+enum class Surface { Widget, Details, Hover, Settings, Menu };
 // The settings panel's sidebar pages, in sidebar order.
 enum class SettingsPage : int32_t { Taskbar, Hover, Providers, General };
 // The settings window's size in DIPs; the tallest page, Providers, fits without scrolling.
@@ -31,6 +32,32 @@ struct Frame {
     bool close{};
     bool save{};
     bool refresh{};
+    // Reset all settings was pressed: every preference is back at its default
+    // in the preview. A host with state of its own, such as a floating widget's
+    // position, resets that too when the change is saved.
+    bool reset_all{};
+    // The context menu item chosen this frame; `close` means it was dismissed.
+    enum class MenuChoice { None, Settings, Debug, Startup, Quit } menu{MenuChoice::None};
+};
+// What the context menu offers. Hosts show the Menu surface in a popup window
+// at the pointer, sized to menu_bounds().
+struct MenuModel {
+    // "Start at boot" on Windows, "Start at login" elsewhere.
+    const char* startup_label{"Start at login"};
+    bool startup_enabled{};
+    // Greyed out when the host cannot read or change the setting.
+    bool startup_available{true};
+    // An extra entry for the debug build, such as "Mock providers..."; null hides it.
+    const char* debug_label{};
+};
+// What the host around the views can do, so settings offer only what works there.
+struct HostFeatures {
+    // The widget sits in a taskbar, placed by the position slider, with a copy on
+    // every monitor's taskbar (Windows). Otherwise it floats wherever the user
+    // dragged it, and settings call it the widget.
+    bool taskbar{true};
+    // The system whose colors and font the views follow, named in settings.
+    const char* system_name{"Windows"};
 };
 
 // Separate contexts prevent popup focus and layout from changing the taskbar view.
@@ -120,6 +147,17 @@ class View {
     bool animations() const {
         return widgets_->animationsEnabled;
     }
+    void set_host_features(HostFeatures value) {
+        features_ = value;
+    }
+    // Opens the context menu at the view's top-left corner. Menu frames then lay
+    // it out until an item is chosen (Frame::menu) or it is dismissed (Frame::close).
+    void open_menu(MenuModel model) {
+        menu_ = model;
+        menu_opening_ = true;
+    }
+    // The open menu's panel as of the last frame, in DIPs.
+    Clay_BoundingBox menu_bounds();
     void set_settings_page(SettingsPage value) {
         settings_page_ = static_cast<int32_t>(value);
     }
@@ -148,6 +186,9 @@ class View {
     uint16_t widget_gap(int normal, int minimum = 0) const;
     int stacked_text_limit() const { return 160 + (100 - widget_spacing_) / 5; }
     bool hovered_{};
+    HostFeatures features_;
+    MenuModel menu_;
+    bool menu_opening_{};
     bool system_light_{};
     bool connection_open_[2]{};
     int32_t settings_page_{};
@@ -178,6 +219,7 @@ class View {
     void taskbar_settings(Frame& result);
     void hover_settings(Frame& result);
     void providers_settings(const Usage& data, Frame& result, std::int64_t now);
+    void context_menu(Frame& result);
     void general_settings(Frame& result);
     void wrapped_text(const std::string& value, uint16_t size, Clay_Color tint);
     Clay_Color accent_color() const;

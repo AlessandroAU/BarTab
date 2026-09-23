@@ -2,10 +2,8 @@
 #include <windows.h>
 #include <dwmapi.h>
 #include <filesystem>
-#include <fstream>
-#include <iterator>
 
-namespace usage::windows {
+namespace usage::host {
 bool system_light_theme() {
     DWORD light{}, bytes = sizeof(light);
     if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
@@ -21,13 +19,13 @@ bool apps_light_theme() {
         return light != 0;
     return system_light_theme();
 }
-bool client_animations_enabled() {
+bool animations_enabled() {
     BOOL enabled = TRUE;
     if (!SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0))
         return true;
     return enabled != FALSE;
 }
-Color windows_accent() {
+Color system_accent() {
     DWORD value{};
     BOOL opaque{};
     if (SUCCEEDED(DwmGetColorizationColor(&value, &opaque)))
@@ -35,7 +33,7 @@ Color windows_accent() {
                 static_cast<std::uint8_t>(value)};
     return {0, 120, 212};
 }
-std::vector<unsigned char> windows_ui_font(bool bold) {
+FontFile ui_font(bool bold) {
     NONCLIENTMETRICSW metrics{};
     metrics.cbSize = sizeof(metrics);
     if (!SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0))
@@ -67,52 +65,48 @@ std::vector<unsigned char> windows_ui_font(bool bold) {
     SelectObject(dc, previous);
     DeleteDC(dc);
     DeleteObject(font);
-    return bytes;
+    return {std::move(bytes), 0};
+}
+std::filesystem::path executable_path() {
+    wchar_t path[32768]{};
+    const DWORD length = GetModuleFileNameW(nullptr, path, static_cast<DWORD>(std::size(path)));
+    return std::filesystem::path(std::wstring(path, length));
 }
 std::filesystem::path executable_directory() {
-    wchar_t path[32768]{};
-    GetModuleFileNameW(nullptr, path, static_cast<DWORD>(std::size(path)));
-    return std::filesystem::path(path).parent_path();
+    return executable_path().parent_path();
+}
+// Settings and the log both live in %LOCALAPPDATA%\UsageTracker.
+std::filesystem::path config_directory() {
+    wchar_t local[32768]{};
+    const auto length = GetEnvironmentVariableW(L"LOCALAPPDATA", local, static_cast<DWORD>(std::size(local)));
+    if (!length || length >= std::size(local))
+        return {};
+    return std::filesystem::path(local) / L"UsageTracker";
+}
+std::filesystem::path log_path() {
+    const auto directory = config_directory();
+    return directory.empty() ? directory : directory / L"prototype.log";
+}
+} // namespace usage::host
+
+namespace usage::windows {
+std::string utf8(const std::wstring& value) {
+    const int count = WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr,
+                                          0, nullptr, nullptr);
+    std::string text(static_cast<std::size_t>(count > 0 ? count : 0), '\0');
+    if (count > 0)
+        WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), text.data(), count,
+                            nullptr, nullptr);
+    return text;
+}
+std::wstring widen(const std::string& utf8) {
+    const int count = MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), nullptr, 0);
+    std::wstring text(static_cast<std::size_t>(count > 0 ? count : 0), L'\0');
+    if (count > 0)
+        MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), text.data(), count);
+    return text;
 }
 void log(const std::wstring& message) {
-    wchar_t local[32768]{};
-    if (!GetEnvironmentVariableW(L"LOCALAPPDATA", local, static_cast<DWORD>(std::size(local))))
-        return;
-    const auto directory = std::filesystem::path(local) / L"UsageTracker";
-    std::error_code error;
-    std::filesystem::create_directories(directory, error);
-    const auto path = directory / L"prototype.log";
-    // The log is capped at 1 MB: past that, drop the oldest half, cutting at a
-    // line boundary, so the newest history always survives.
-    constexpr std::uintmax_t log_limit = 1024 * 1024;
-    const auto size = std::filesystem::file_size(path, error);
-    if (!error && size >= log_limit) {
-        std::string contents;
-        {
-            std::ifstream old(path, std::ios::binary);
-            contents.assign(std::istreambuf_iterator<char>(old), std::istreambuf_iterator<char>());
-        }
-        const auto cut = contents.find('\n', contents.size() - log_limit / 2);
-        auto trimmed = path;
-        trimmed += L".tmp";
-        {
-            std::ofstream kept(trimmed, std::ios::binary | std::ios::trunc);
-            if (cut != std::string::npos)
-                kept.write(contents.data() + cut + 1, static_cast<std::streamsize>(contents.size() - cut - 1));
-        }
-        if (!MoveFileExW(trimmed.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING))
-            std::filesystem::remove(trimmed, error);
-    }
-    SYSTEMTIME now{};
-    GetLocalTime(&now);
-    std::ofstream stream(path, std::ios::app);
-    const int count = WideCharToMultiByte(CP_UTF8, 0, message.data(), static_cast<int>(message.size()),
-                                          nullptr, 0, nullptr, nullptr);
-    std::string text(static_cast<std::size_t>(count), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, message.data(), static_cast<int>(message.size()), text.data(), count,
-                        nullptr, nullptr);
-    stream << now.wYear << '-' << now.wMonth << '-' << now.wDay << ' ' << now.wHour << ':' << now.wMinute
-           << ':' << now.wSecond << " [C++] " << text << '\n';
+    host::log(utf8(message));
 }
-
 } // namespace usage::windows

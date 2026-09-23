@@ -1,5 +1,6 @@
 #include "core/provider_protocol.hpp"
 #include <json.hpp>
+#include <algorithm>
 #include <iostream>
 #include <stdexcept>
 
@@ -26,7 +27,8 @@ void codex_exchange() {
     usage::ProviderProtocol protocol(usage::Service::Codex);
     const auto initialize = Json::parse(protocol.initialize());
     check(initialize.at("id") == 1 && initialize.at("method") == "initialize", "Codex initializes first");
-    check(protocol.arguments() == L" app-server --listen stdio://", "Codex uses the stdio server");
+    check(protocol.arguments() == std::vector<std::string>{"app-server", "--listen", "stdio://"},
+          "Codex uses the stdio server");
     ignored(protocol, R"({"method":"notification"})");
     ignored(protocol, R"({"id":"1","result":{}})");
     ignored(protocol, R"({"id":99,"error":{}})");
@@ -54,8 +56,11 @@ void claude_exchange() {
     check(initialize.at("type") == "control_request" && initialize.at("request_id") == "init" &&
               initialize.at("request").at("subtype") == "initialize",
           "Claude initializes first");
-    check(protocol.arguments().find(L"--safe-mode --strict-mcp-config") != std::wstring::npos &&
-              protocol.arguments().find(L"--no-session-persistence") != std::wstring::npos,
+    const auto arguments = protocol.arguments();
+    const auto has = [&](const char* flag) {
+        return std::find(arguments.begin(), arguments.end(), flag) != arguments.end();
+    };
+    check(has("--safe-mode") && has("--strict-mcp-config") && has("--no-session-persistence"),
           "Claude keeps safe launch options");
     ignored(protocol, R"({"type":"system"})");
     ignored(protocol, R"({"type":"control_response","response":{"request_id":"other","subtype":"error"}})");

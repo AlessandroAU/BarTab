@@ -1,8 +1,8 @@
-#include "windows/providers.hpp"
-#include "windows/process_transport.hpp"
+#include "host/providers.hpp"
+#include "host/process_transport.hpp"
 #include <exception>
 
-namespace usage::windows {
+namespace usage::host {
 namespace {
 AccountUsage read_limits(const std::atomic<bool>& stop, const std::filesystem::path& exe, Service service) {
     ProviderProtocol protocol(service);
@@ -106,4 +106,53 @@ void UsageReader::run() {
         }
     }
 }
-} // namespace usage::windows
+void ProviderSession::detect() {
+    if (demo_)
+        return;
+    if (mock_) {
+        for (const auto service : {Service::Codex, Service::Claude}) {
+            auto& account = service == Service::Claude ? usage_.claude : usage_.codex;
+            account.installed = mock_->provider(service).state != MockState::Missing;
+            account.executable_path = account.installed ? mock_path(service) : std::string{};
+            if (!account.installed)
+                account.error.clear();
+        }
+        return;
+    }
+    detect_service(Service::Codex, usage_.codex);
+    detect_service(Service::Claude, usage_.claude);
+}
+void ProviderSession::apply(const Preferences& preferences) {
+    if (demo_)
+        return;
+    if (usage_.codex_enabled) {
+        if (!codex_)
+            codex_ = std::make_unique<UsageReader>(Service::Codex, usage_.codex, mock_);
+        codex_->set_interval(preferences.codex_interval);
+    } else
+        codex_.reset();
+    if (usage_.claude_enabled) {
+        if (!claude_)
+            claude_ = std::make_unique<UsageReader>(Service::Claude, usage_.claude, mock_);
+        claude_->set_interval(preferences.claude_interval);
+    } else
+        claude_.reset();
+}
+void ProviderSession::refresh() {
+    if (codex_)
+        codex_->refresh();
+    if (claude_)
+        claude_->refresh();
+}
+ProviderSession::Update ProviderSession::poll(std::int64_t now) {
+    const auto codex_before = usage_.codex;
+    const auto claude_before = usage_.claude;
+    const bool codex_changed = codex_ && codex_->take(usage_.codex);
+    const bool claude_changed = claude_ && claude_->take(usage_.claude);
+    Update result;
+    result.changed = codex_changed || claude_changed;
+    result.reset = (codex_changed && !reset_windows(codex_before, usage_.codex, now).empty()) ||
+                   (claude_changed && !reset_windows(claude_before, usage_.claude, now).empty());
+    return result;
+}
+} // namespace usage::host

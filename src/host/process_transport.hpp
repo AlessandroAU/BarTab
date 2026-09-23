@@ -5,12 +5,17 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
-namespace usage::windows {
-// One hidden process tree and a newline-delimited connection. The stop flag must outlive this object.
+namespace usage::host {
+// One hidden process tree and a newline-delimited connection to it. Destroying
+// the transport kills the whole tree. The stop flag must outlive this object.
+// Implemented by src/windows/process_transport.cpp (a job object) and
+// src/posix/process_transport.cpp (a process group).
 class ProcessTransport {
   public:
-    ProcessTransport(const std::filesystem::path& executable, const std::wstring& arguments,
+    // `arguments` are UTF-8 and exclude the executable itself.
+    ProcessTransport(const std::filesystem::path& executable, const std::vector<std::string>& arguments,
                      const std::atomic<bool>& stop,
                      std::chrono::milliseconds timeout = std::chrono::seconds(20));
     ~ProcessTransport();
@@ -23,4 +28,4 @@ class ProcessTransport {
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
-} // namespace usage::windows
+} // namespace usage::host

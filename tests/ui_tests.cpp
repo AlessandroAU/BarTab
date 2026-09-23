@@ -63,10 +63,122 @@ void confetti_tests() {
     check(confetti.done(), "An empty burst stays empty");
     std::cout << "PASS: confetti burst\n";
 }
+// A host without a taskbar: the widget page drops taskbar placement. Windows
+// keeps the defaults.
+void host_feature_tests() {
+    using usage::ui::settings_height;
+    using usage::ui::settings_width;
+    usage::Usage live;
+    live.live = true;
+    usage::ui::View taskbar(usage::ui::Surface::Settings, measure, nullptr);
+    auto frame = taskbar.frame(live, neutral(), settings_width, settings_height);
+    check(taskbar.bounds("WidgetPosition").width > 0 && taskbar.bounds("AllTaskbars").width > 0 &&
+              taskbar.bounds("WidgetHeight").width == 0 && contains(frame.commands, "Taskbar"),
+          "A taskbar host offers placement along the taskbar");
+
+    usage::ui::View floating(usage::ui::Surface::Settings, measure, nullptr);
+    usage::ui::HostFeatures features;
+    features.taskbar = false;
+    features.system_name = "desktop";
+    floating.set_host_features(features);
+    frame = floating.frame(live, neutral(), settings_width, settings_height);
+    check(floating.bounds("WidgetWidth").width > 0 && floating.bounds("WidgetHeight").width > 0 &&
+              floating.bounds("WidgetPosition").width == 0 && floating.bounds("AllTaskbars").width == 0 &&
+              !contains(frame.commands, "Taskbar"),
+          "A floating widget's page leaves out taskbar placement");
+    // Reset all settings: every preference back to its default, as a preview.
+    auto customised = usage::Preferences{};
+    customised.appearance.widget_width = 300;
+    customised.appearance.hover_enabled = false;
+    customised.codex_enabled = false;
+    customised.claude_interval = 300;
+    floating.set_preferences(customised);
+    floating.set_settings_page(usage::ui::SettingsPage::General);
+    floating.frame(live, neutral(), settings_width, settings_height);
+    const auto reset = floating.bounds("ResetAll");
+    auto pointer = neutral();
+    pointer.mouseX = reset.x + reset.width / 2;
+    pointer.mouseY = reset.y + reset.height / 2;
+    floating.frame(live, pointer, settings_width, settings_height);
+    pointer.pointerDown = pointer.pointerPressed = true;
+    floating.frame(live, pointer, settings_width, settings_height);
+    pointer.pointerDown = pointer.pointerPressed = false;
+    pointer.pointerReleased = true;
+    frame = floating.frame(live, pointer, settings_width, settings_height);
+    check(reset.width > 0 && frame.reset_all && frame.changed &&
+              floating.preferences() == usage::Preferences{},
+          "Reset all settings restores every preference, providers included, as a preview");
+    std::cout << "PASS: host features\n";
+}
+// The context menu both hosts show at the pointer: the panel sizes the window,
+// items report the choice, and Escape or an outside press dismisses it.
+void context_menu_tests() {
+    using Choice = usage::ui::Frame::MenuChoice;
+    usage::Usage live;
+    live.live = true;
+    usage::ui::View menu(usage::ui::Surface::Menu, measure, nullptr);
+    const auto open = [&](usage::ui::MenuModel model) {
+        menu.open_menu(model);
+        menu.frame(live, neutral(), 600, 600);
+        return menu.frame(live, neutral(), 600, 600);
+    };
+    const auto click = [&](const char* name) {
+        const auto bounds = menu.bounds(name);
+        auto pointer = neutral();
+        pointer.mouseX = bounds.x + bounds.width / 2;
+        pointer.mouseY = bounds.y + bounds.height / 2;
+        menu.frame(live, pointer, 600, 600);
+        pointer.pointerDown = pointer.pointerPressed = true;
+        menu.frame(live, pointer, 600, 600);
+        pointer.pointerDown = pointer.pointerPressed = false;
+        pointer.pointerReleased = true;
+        const auto chosen = menu.frame(live, pointer, 600, 600);
+        return std::make_pair(chosen.menu, menu.frame(live, neutral(), 600, 600).close);
+    };
+    usage::ui::MenuModel model;
+    model.startup_label = "Start at boot";
+    auto frame = open(model);
+    const auto panel = menu.menu_bounds();
+    check(!frame.close && panel.x == 0 && panel.y == 0 && panel.width >= 180 && panel.height > 0,
+          "The menu opens at the view's corner, where the host's window starts");
+    check(contains(frame.commands, "Settings") && contains(frame.commands, "Start at boot") &&
+              contains(frame.commands, "Quit") && menu.bounds("MenuDebug").width == 0,
+          "The menu lists settings, startup and quit, without a debug entry by default");
+    check(menu.bounds("MenuSettings").y < menu.bounds("MenuStartup").y &&
+              menu.bounds("MenuStartup").y < menu.bounds("MenuQuit").y,
+          "Menu entries keep their order");
+    const auto settings = click("MenuSettings");
+    check(settings.first == Choice::Settings && settings.second,
+          "Choosing an entry reports it and closes the menu");
+    open(model);
+    check(click("MenuStartup").first == Choice::Startup, "The startup entry asks the host to toggle it");
+    open(model);
+    check(click("MenuQuit").first == Choice::Quit, "Quit asks the host to quit");
+
+    model.startup_available = false;
+    model.debug_label = "Mock providers...";
+    frame = open(model);
+    check(contains(frame.commands, "Mock providers...") && menu.bounds("MenuDebug").width > 0,
+          "The debug build adds its entry");
+    check(click("MenuStartup").first == Choice::None && !menu.frame(live, neutral(), 600, 600).close,
+          "An unavailable startup entry is inert and leaves the menu open");
+    auto escape = neutral();
+    escape.keyEscape = true;
+    menu.frame(live, escape, 600, 600);
+    check(menu.frame(live, neutral(), 600, 600).close, "Escape dismisses the menu");
+    open(model);
+    auto outside = neutral();
+    outside.mouseX = outside.mouseY = 590;
+    outside.pointerDown = outside.pointerPressed = true;
+    check(menu.frame(live, outside, 600, 600).close, "A press outside the panel dismisses the menu");
+    std::cout << "PASS: context menu\n";
+}
 } // namespace
 int main() {
     try {
         confetti_tests();
+        host_feature_tests();
+        context_menu_tests();
         {
             usage::ui::View split(usage::ui::Surface::Widget, measure, nullptr);
             usage::Usage account;
@@ -595,7 +707,7 @@ int main() {
                 const char* last;
             } pages[] = {{SettingsPage::Taskbar, "TaskbarScroll", "BarHeight"},
                          {SettingsPage::Hover, "HoverScroll", "HoverOpacity"},
-                         {SettingsPage::General, "GeneralScroll", "TimeFormat"}};
+                         {SettingsPage::General, "GeneralScroll", "ResetAll"}};
             for (const auto& entry : pages) {
                 settings.set_settings_page(entry.page);
                 settings.frame(live, neutral(), usage::ui::settings_width, usage::ui::settings_height);

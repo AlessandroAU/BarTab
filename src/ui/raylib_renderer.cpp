@@ -19,7 +19,11 @@
 namespace usage::ui {
 struct Renderer::Impl {
     FontCache fonts;
-    std::map<uint16_t, std::vector<unsigned char>> font_data;
+    struct FontData {
+        std::vector<unsigned char> bytes;
+        long face_index{};
+    };
+    std::map<uint16_t, FontData> font_data;
     RenderTexture2D widget_texture{}, details_texture{}, confetti_texture{};
     Impl() {
         SetTraceLogLevel(LOG_WARNING);
@@ -53,14 +57,16 @@ bool Renderer::load_font(uint16_t id, const std::filesystem::path& path) {
     std::vector<unsigned char> bytes{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
     return load_font_data(id, std::move(bytes));
 }
-bool Renderer::load_font_data(uint16_t id, std::vector<unsigned char> bytes) {
+bool Renderer::load_font_data(uint16_t id, std::vector<unsigned char> bytes, long face_index) {
     if (bytes.empty())
         return false;
     auto& data = impl_->font_data[id];
-    if (data == bytes)
+    if (data.bytes == bytes && data.face_index == face_index)
         return false;
-    data = std::move(bytes);
-    return FontCache_Register(impl_->fonts, id, data.data(), static_cast<int>(data.size()));
+    data.bytes = std::move(bytes);
+    data.face_index = face_index;
+    return FontCache_Register(impl_->fonts, id, data.bytes.data(), static_cast<int>(data.bytes.size()),
+                              nullptr, 0, face_index);
 }
 void Renderer::set_surface(float scale, float text_gamma) {
     impl_->fonts.dpiScale = scale;

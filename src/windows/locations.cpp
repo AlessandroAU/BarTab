@@ -1,8 +1,7 @@
-#include "windows/service_discovery.hpp"
+#include "host/service_discovery.hpp"
 #include <windows.h>
-#include <exception>
 
-namespace usage::windows {
+namespace usage::host {
 namespace {
 std::wstring environment(const wchar_t* name) {
     const DWORD size = GetEnvironmentVariableW(name, nullptr, 0);
@@ -21,7 +20,7 @@ std::filesystem::path unquote(std::wstring value) {
     return value;
 }
 } // namespace
-DiscoveryResult find_service(Service service) {
+DiscoveryLocations search_locations(Service service) {
     const bool claude = service == Service::Claude;
     DiscoveryLocations locations;
     locations.override_path = unquote(environment(claude ? L"USAGETRACKER_CLAUDE" : L"USAGETRACKER_CODEX"));
@@ -77,21 +76,6 @@ DiscoveryResult find_service(Service service) {
     const auto portable = environment(L"VSCODE_PORTABLE");
     if (!portable.empty())
         locations.extensions.push_back(std::filesystem::path(portable) / L"extensions");
-    return discover_executable(claude, locations);
+    return locations;
 }
-void detect_service(Service service, AccountUsage& result) {
-    try {
-        const auto detection = find_service(service);
-        const auto& path = detection.path;
-        if (path.empty() || !result.installed)
-            result.error = detection.error;
-        result.installed = !path.empty();
-        const auto utf8 = path.u8string();
-        result.executable_path.assign(utf8.begin(), utf8.end());
-    } catch (const std::exception& error) {
-        result.installed = false;
-        result.executable_path.clear();
-        result.error = error.what();
-    }
-}
-} // namespace usage::windows
+} // namespace usage::host

@@ -1,10 +1,15 @@
-#include "windows/settings_store.hpp"
+#include "host/settings_store.hpp"
 #include "core/settings_edit.hpp"
-#include <windows.h>
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace {
 void check(bool value, const char* message) {
@@ -12,9 +17,10 @@ void check(bool value, const char* message) {
         throw std::runtime_error(message);
 }
 struct TemporaryDirectory {
-    std::filesystem::path path = std::filesystem::temp_directory_path() /
-                                 (L"usage-settings-test-" + std::to_wstring(GetCurrentProcessId()) + L"-" +
-                                  std::to_wstring(GetTickCount64()));
+    std::filesystem::path path =
+        std::filesystem::temp_directory_path() /
+        ("usage-settings-test-" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     TemporaryDirectory() {
         std::filesystem::create_directories(path);
     }
@@ -23,20 +29,44 @@ struct TemporaryDirectory {
         std::filesystem::remove_all(path, ignored);
     }
 };
-struct FileLock {
+// Makes saving to `path` fail until destroyed: Windows locks the file itself,
+// elsewhere its folder turns read-only. Root ignores permissions, so there the
+// lock cannot hold and `held` is false.
+struct SaveLock {
+#ifdef _WIN32
     HANDLE handle;
-    ~FileLock() {
-        if (handle != INVALID_HANDLE_VALUE)
+    bool held;
+    explicit SaveLock(const std::filesystem::path& path)
+        : handle(
+              CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr)),
+          held(handle != INVALID_HANDLE_VALUE) {}
+    ~SaveLock() {
+        if (held)
             CloseHandle(handle);
     }
+#else
+    std::filesystem::path folder;
+    bool held;
+    explicit SaveLock(const std::filesystem::path& path) : folder(path.parent_path()), held(geteuid() != 0) {
+        std::filesystem::permissions(folder,
+                                     std::filesystem::perms::owner_read | std::filesystem::perms::owner_exec);
+    }
+    ~SaveLock() {
+        std::filesystem::permissions(folder, std::filesystem::perms::owner_all);
+    }
+#endif
+    SaveLock(const SaveLock&) = delete;
+    SaveLock& operator=(const SaveLock&) = delete;
 };
 } // namespace
 int main() {
     try {
         TemporaryDirectory temporary;
-        const auto path = temporary.path / L"nested/settings.ini";
+        const auto path = temporary.path / "nested/settings.ini";
+        auto leftover = path;
+        leftover += ".tmp";
         using namespace usage;
-        using namespace usage::windows;
+        using namespace usage::host;
         check(read_settings(path) == Preferences{}, "Missing settings use defaults");
         check(read_settings({}) == Preferences{}, "Empty load path uses defaults");
         check(!write_settings({}, {}), "Empty save path fails");
@@ -46,6 +76,7 @@ int main() {
         saved.appearance.bold_taskbar = true;
         saved.appearance.bold_settings = true;
         saved.appearance.all_taskbars = true;
+        saved.appearance.widget_height = 30;
         saved.codex_enabled = false;
         saved.claude_enabled = false;
         saved.codex_interval = 45;
@@ -59,22 +90,21 @@ int main() {
         check(write_settings(path, replacement), "Save replaces an existing file");
         replacement.normalize();
         check(read_settings(path) == replacement, "Saved values are normalized");
-        check(!std::filesystem::exists(path.wstring() + L".tmp"), "Successful save leaves no temporary file");
+        check(!std::filesystem::exists(leftover), "Successful save leaves no temporary file");
         {
             SettingsEdit edit;
             edit.begin(replacement);
             auto draft = replacement;
             draft.codex_enabled = true;
-            FileLock lock{
-                CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr)};
-            check(lock.handle != INVALID_HANDLE_VALUE, "Lock the destination for failure testing");
-            check(!write_settings(path, draft), "A locked destination reports save failure");
-            check(read_settings(path) == replacement, "Failed save preserves the previous file");
-            check(edit.cancel() == replacement, "Failed save leaves the edit cancellable");
-            check(!std::filesystem::exists(path.wstring() + L".tmp"),
-                  "Failed save cleans its temporary file");
+            SaveLock lock(path);
+            if (lock.held) {
+                check(!write_settings(path, draft), "A locked destination reports save failure");
+                check(read_settings(path) == replacement, "Failed save preserves the previous file");
+                check(edit.cancel() == replacement, "Failed save leaves the edit cancellable");
+                check(!std::filesystem::exists(leftover), "Failed save cleans its temporary file");
+            }
         }
-        const auto invalid = temporary.path / L"invalid.ini";
+        const auto invalid = temporary.path / "invalid.ini";
         {
             std::ofstream file(invalid);
             file << "[Appearance]\nTextPercent=999\nWidgetWidth=1\nFont=99\nHoverDelay=900\nHoverOpacity=oops\n"
@@ -90,7 +120,7 @@ int main() {
               "Malformed numbers produce a valid preference");
         check(loaded.codex_enabled,
               "Missing keys retain defaults");
-        const auto legacy = temporary.path / L"legacy.ini";
+        const auto legacy = temporary.path / "legacy.ini";
         {
             std::ofstream file(legacy);
             file << "[Appearance]\nBoldText=1\nBoldHover=0\n";
@@ -99,7 +129,7 @@ int main() {
         check(migrated.bold_taskbar && migrated.bold_settings,
               "The old shared BoldText switch seeds every surface's bold setting");
         check(!migrated.bold_hover, "A per-surface bold key overrides the old shared switch");
-        const auto absolute = temporary.path / L"absolute.ini";
+        const auto absolute = temporary.path / "absolute.ini";
         {
             std::ofstream file(absolute);
             file << "[Appearance]\nTextPercent=150\nHoverTextPercent=130\n";

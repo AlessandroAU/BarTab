@@ -235,18 +235,31 @@ bool View::begin_settings_page(const char* title, const char* scroll_id, const c
 }
 void View::taskbar_settings(Frame& result) {
     auto& a = preferences_.appearance;
-    begin_settings_page("Taskbar", "TaskbarScroll");
+    begin_settings_page(features_.taskbar ? "Taskbar" : "Widget", "TaskbarScroll");
     settings_section("Text", false);
     result.changed = setting_slider("TextSizeSlider", "Text size", a.text_percent,
                                     preference_limits::text_percent, "%") || result.changed;
     result.changed = setting_toggle("BoldTaskbar", "Bold text", a.bold_taskbar) || result.changed;
     result.changed = setting_toggle("ShowResets", "Show reset dates", a.show_resets) || result.changed;
-    settings_section("Size and position", true);
+    settings_section(features_.taskbar ? "Size and position" : "Size", true);
     result.changed = setting_slider("WidgetWidth", "Widget width", a.widget_width,
                                     preference_limits::widget_width, " px") || result.changed;
-    result.changed = setting_slider("WidgetPosition", "Position", a.position, preference_limits::position,
-                                    "% from left") || result.changed;
-    result.changed = setting_toggle("AllTaskbars", "Show on every monitor", a.all_taskbars) || result.changed;
+    // A floating widget is placed by dragging it, and there is no taskbar per monitor.
+    if (features_.taskbar) {
+        result.changed = setting_slider("WidgetPosition", "Position", a.position, preference_limits::position,
+                                        "% from left") ||
+                         result.changed;
+        result.changed =
+            setting_toggle("AllTaskbars", "Show on every monitor", a.all_taskbars) || result.changed;
+    } else {
+        // A floating widget can be sized to sit in a desktop panel.
+        result.changed = setting_slider("WidgetHeight", "Widget height", a.widget_height,
+                                        preference_limits::widget_height, " px") ||
+                         result.changed;
+        wrapped_text(
+            "Drag the widget onto a desktop panel to dock it there; it then takes the panel's height.",
+            settings_help, {166, 187, 208, 255});
+    }
     result.changed = setting_slider("BarHeight", "Bar thickness", a.bar_height, preference_limits::bar_height,
                                     " px") || result.changed;
     ClayWidgets_EndScrollPanel(widgets_.get(), CLAY_ID("TaskbarScroll"));
@@ -261,8 +274,8 @@ void View::hover_settings(Frame& result) {
     result.changed = setting_toggle("BoldHover", "Bold text", a.bold_hover) || result.changed;
     result.changed = setting_slider("HoverOpacity", "Opacity", a.hover_opacity,
                                     preference_limits::hover_opacity, "%") || result.changed;
-    wrapped_text("While settings are open the hover card stays pinned beside the taskbar, so these "
-                 "changes preview live.",
+    wrapped_text(std::string("While settings are open the hover card stays pinned beside the ") +
+                     (features_.taskbar ? "taskbar" : "widget") + ", so these changes preview live.",
                  settings_help, {166, 187, 208, 255});
     ClayWidgets_EndScrollPanel(widgets_.get(), CLAY_ID("HoverScroll"));
 }
@@ -289,8 +302,20 @@ void View::general_settings(Frame& result) {
             }
         }
     }
-    wrapped_text("Reset times on the taskbar, the hover card and here use this format. Colors, accent "
-                 "and font family follow Windows settings.",
+    wrapped_text(std::string("Reset times on the ") + (features_.taskbar ? "taskbar" : "widget") +
+                     ", the hover card and here use this format. Colors, accent and font family follow " +
+                     features_.system_name + " settings.",
+                 settings_help, {166, 187, 208, 255});
+    settings_section("Reset", true);
+    CLAY_AUTO_ID (setting_row()) {
+        if (ClayWidgets_Button(widgets_.get(), CLAY_ID("ResetAll"), CLAY_STRING("Reset all settings"))) {
+            preferences_ = Preferences{};
+            result.changed = result.reset_all = true;
+        }
+    }
+    wrapped_text(std::string("Restores every setting") +
+                     (features_.taskbar ? "" : " and the widget's place") +
+                     " to its default. Save keeps the reset; Cancel undoes it.",
                  settings_help, {166, 187, 208, 255});
     ClayWidgets_EndScrollPanel(widgets_.get(), CLAY_ID("GeneralScroll"));
 }
@@ -435,7 +460,7 @@ void View::settings_panel(const Usage& data, Frame& result, ClayWidgets_Input in
                     const char* id;
                     const char* title;
                     SettingsPage page;
-                } pages[] = {{"NavTaskbar", "Taskbar", SettingsPage::Taskbar},
+                } pages[] = {{"NavTaskbar", features_.taskbar ? "Taskbar" : "Widget", SettingsPage::Taskbar},
                              {"NavHover", "Hover card", SettingsPage::Hover},
                              {"NavProviders", "Providers", SettingsPage::Providers},
                              {"NavGeneral", "General", SettingsPage::General}};
@@ -881,7 +906,7 @@ const char* View::label(std::string value) {
     return labels_.back().c_str();
 }
 Clay_Dimensions widget_size(const Appearance& appearance) {
-    return {static_cast<float>(appearance.widget_width), static_cast<float>(widget_height)};
+    return {static_cast<float>(appearance.widget_width), static_cast<float>(appearance.widget_height)};
 }
 Rect place_widget(const Appearance& appearance, Rect panel, const std::vector<Rect>& occupied, float scale) {
     if (scale <= 0) return {};
@@ -1118,7 +1143,8 @@ void View::apply_theme() {
     widgets_->theme.onAccentColor = (selected_accent.r * 0.299f + selected_accent.g * 0.587f +
                                      selected_accent.b * 0.114f) > 150.f
                                         ? Clay_Color{20, 20, 20, 255} : Clay_Color{255, 255, 255, 255};
-    widgets_->theme.fontSizeBody = surface_ == Surface::Settings ? settings_body : 18;
+    widgets_->theme.fontSizeBody =
+        surface_ == Surface::Settings || surface_ == Surface::Menu ? settings_body : 18;
 }
 
 void View::live_panel(const Usage& data, Frame& result, ClayWidgets_Input input) {
@@ -1420,6 +1446,50 @@ void View::demo_details(Usage& data, Frame& result, ClayWidgets_Input input) {
             ClayWidgets_Button(widgets_.get(), CLAY_ID("Close"), CLAY_STRING("Close")) || input.keyEscape;
     }
 }
+namespace {
+constexpr const char* context_menu_id = "ContextMenu";
+} // namespace
+// The whole view is the menu: it opens at the origin, and the host sizes its
+// window to the panel, so the panel is all that shows.
+void View::context_menu(Frame& result) {
+    auto* widgets = widgets_.get();
+    const auto menu = id(context_menu_id);
+    if (menu_opening_) {
+        ClayWidgets_OpenContextMenu(widgets, menu, 0, 0);
+        menu_opening_ = false;
+    }
+    Clay_ElementDeclaration root{};
+    root.layout.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)};
+    CLAY (CLAY_ID("MenuRoot"), root) {
+        if (!ClayWidgets_BeginContextMenu(widgets, menu)) {
+            result.close = true;
+        } else {
+            using Choice = Frame::MenuChoice;
+            if (ClayWidgets_MenuItem(widgets, id("MenuSettings"), CLAY_STRING("Settings")))
+                result.menu = Choice::Settings;
+            if (menu_.debug_label &&
+                ClayWidgets_MenuItem(widgets, id("MenuDebug"), string(menu_.debug_label)))
+                result.menu = Choice::Debug;
+            ClayWidgets_MenuSeparator(widgets);
+            bool startup = menu_.startup_enabled;
+            const bool disabled = !menu_.startup_available && ClayWidgets_BeginDisabled(widgets);
+            if (ClayWidgets_MenuCheckItem(widgets, id("MenuStartup"), string(menu_.startup_label), &startup))
+                result.menu = Choice::Startup;
+            if (disabled)
+                ClayWidgets_EndDisabled(widgets);
+            ClayWidgets_MenuSeparator(widgets);
+            if (ClayWidgets_MenuItem(widgets, id("MenuQuit"), CLAY_STRING("Quit")))
+                result.menu = Choice::Quit;
+            ClayWidgets_EndContextMenu(widgets, menu);
+        }
+    }
+}
+Clay_BoundingBox View::menu_bounds() {
+    Clay_SetCurrentContext(clay_);
+    return Clay_GetElementData(
+               Clay_GetElementIdWithIndex(CLAY_STRING("ClayWidgetsContextMenuPanel"), id(context_menu_id).id))
+        .boundingBox;
+}
 Frame View::frame(Usage& data, ClayWidgets_Input input, float width, float height) {
     Clay_SetCurrentContext(clay_);
     frame_width_ = width;
@@ -1433,7 +1503,9 @@ Frame View::frame(Usage& data, ClayWidgets_Input input, float width, float heigh
     Frame result;
     const bool dismiss_dropdown = input.keyEscape && widgets_->openComboId != 0;
     ClayWidgets_BeginFrame(widgets_.get(), input, {width, height}, false);
-    if (data.live) {
+    if (surface_ == Surface::Menu) {
+        context_menu(result);
+    } else if (data.live) {
         switch (surface_) {
         case Surface::Settings:
             settings_panel(data, result, input);
@@ -1444,6 +1516,8 @@ Frame View::frame(Usage& data, ClayWidgets_Input input, float width, float heigh
         case Surface::Widget:
         case Surface::Details:
             live_panel(data, result, input);
+            break;
+        case Surface::Menu:
             break;
         }
     } else {
@@ -1463,6 +1537,8 @@ Frame View::frame(Usage& data, ClayWidgets_Input input, float width, float heigh
             break;
         case Surface::Details:
             demo_details(data, result, input);
+            break;
+        case Surface::Menu:
             break;
         }
     }

@@ -1,20 +1,20 @@
 #include "windows/app.hpp"
 #include "windows/platform.hpp"
-#include "windows/settings_store.hpp"
+#include "host/settings_store.hpp"
 
 namespace usage::windows {
+std::filesystem::path App::settings_file(bool mock) {
+    const auto directory = host::config_directory();
+    return directory.empty() ? directory : directory / (mock ? L"debug-settings.ini" : L"settings.ini");
+}
+
 void App::load_settings() {
     if (smoke_) {
         settings_path_ = executable_directory() / L"smoke-settings.ini";
         preferences_ = Preferences{};
     } else {
-        wchar_t local[32768]{};
-        const auto length =
-            GetEnvironmentVariableW(L"LOCALAPPDATA", local, static_cast<DWORD>(std::size(local)));
-        if (length > 0 && length < std::size(local))
-            settings_path_ = std::filesystem::path(local) / L"UsageTracker" /
-                             (mock_ ? L"debug-settings.ini" : L"settings.ini");
-        preferences_ = read_settings(settings_path_);
+        settings_path_ = settings_file(mock_ != nullptr);
+        preferences_ = host::read_settings(settings_path_);
     }
     usage_.codex_enabled = preferences_.codex_enabled;
     usage_.claude_enabled = preferences_.claude_enabled;
@@ -37,7 +37,7 @@ void App::cancel_settings_preview() {
 
 bool App::save_settings(Preferences value) {
     value.normalize();
-    if (!write_settings(settings_path_, value)) {
+    if (!host::write_settings(settings_path_, value)) {
         MessageBoxW(popup_,
                     L"Could not save your preferences. Check that your local app data folder is writable.",
                     L"UsageTracker settings", MB_OK | MB_ICONERROR);

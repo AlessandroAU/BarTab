@@ -3,7 +3,7 @@
 // same machine produce identical PNGs.
 #include "ui/raylib_renderer.hpp"
 #include "ui/views.hpp"
-#include "windows/platform.hpp"
+#include "host/platform.hpp"
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -95,9 +95,11 @@ int main(int argc, char** argv) {
     const std::filesystem::path directory = argc > 1 ? argv[1] : "docs/images";
     try {
         Shooter shooter(directory);
-        if (!shooter.renderer().load_font_data(ui::regular_font, windows::windows_ui_font(false)) ||
-            !shooter.renderer().load_font_data(ui::bold_font, windows::windows_ui_font(true)))
-            throw std::runtime_error("Could not read the Windows UI font");
+        auto regular = host::ui_font(false), bold = host::ui_font(true);
+        if (!shooter.renderer().load_font_data(ui::regular_font, std::move(regular.bytes),
+                                               regular.face_index) ||
+            !shooter.renderer().load_font_data(ui::bold_font, std::move(bold.bytes), bold.face_index))
+            throw std::runtime_error("Could not read the system UI font");
 
         const auto data = demo_usage();
         Preferences preferences;

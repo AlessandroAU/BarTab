@@ -1,13 +1,14 @@
 #pragma once
-#include "windows/service_discovery.hpp"
+#include "host/service_discovery.hpp"
 #include "core/mock_provider.hpp"
 #include <atomic>
 #include <memory>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
+#include <ctime>
 
-namespace usage::windows {
+namespace usage::host {
 // The debug build's stand-in for the installed CLIs. The control panel edits
 // it on the UI thread while the readers read it from theirs.
 class MockProviders {
@@ -59,4 +60,37 @@ class UsageReader {
     AccountUsage latest_;
     std::thread worker_;
 };
-} // namespace usage::windows
+
+// The provider side of a desktop host: which CLIs are installed, one polling
+// reader per enabled provider, and the readings they publish into `usage`.
+class ProviderSession {
+  public:
+    // `demo` keeps the fixed demo data: nothing is detected or polled. With
+    // `mock`, the debug build's mock endpoints stand in for the CLIs.
+    ProviderSession(Usage& usage, std::shared_ptr<MockProviders> mock, bool demo)
+        : usage_(usage), mock_(std::move(mock)), demo_(demo) {}
+    // Finds each CLI again, updating whether it is installed and where.
+    void detect();
+    // Starts or stops each provider's reader to match Usage's enabled flags,
+    // and applies the preferences' polling intervals.
+    void apply(const Preferences& preferences);
+    // Asks every running reader for a fresh reading now.
+    void refresh();
+    struct Update {
+        bool changed{};
+        // An allowance window reset between two readings: worth a celebration.
+        bool reset{};
+    };
+    // Takes whatever the readers published since the last call.
+    Update poll(std::int64_t now = std::time(nullptr));
+    const std::shared_ptr<MockProviders>& mock() const {
+        return mock_;
+    }
+
+  private:
+    Usage& usage_;
+    std::shared_ptr<MockProviders> mock_;
+    bool demo_;
+    std::unique_ptr<UsageReader> codex_, claude_;
+};
+} // namespace usage::host
