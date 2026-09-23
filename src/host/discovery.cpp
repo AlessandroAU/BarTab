@@ -85,7 +85,7 @@ DiscoveryResult discover_executable(bool claude, const DiscoveryLocations& locat
     const auto name = executable_name(claude);
     const auto lowered_name = lower(name.native());
     const std::string provider = claude ? "Claude" : "Codex";
-    const std::string variable = std::string("USAGETRACKER_") + (claude ? "CLAUDE" : "CODEX");
+    const std::string variable = std::string("BARTAB_") + (claude ? "CLAUDE" : "CODEX");
     if (!locations.override_path.empty()) {
 #ifdef _WIN32
         if (lower(locations.override_path.extension().native()) == L".exe" &&

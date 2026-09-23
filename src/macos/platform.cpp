@@ -28,11 +28,11 @@ std::filesystem::path executable_directory() {
 }
 std::filesystem::path config_directory() {
     const auto base = home();
-    return base.empty() ? base : base / "Library/Application Support/UsageTracker";
+    return base.empty() ? base : base / "Library/Application Support/BarTab";
 }
 std::filesystem::path log_path() {
     const auto base = home();
-    return base.empty() ? base : base / "Library/Logs/UsageTracker/usagetracker.log";
+    return base.empty() ? base : base / "Library/Logs/BarTab/bartab.log";
 }
 bool system_light_theme() {
     return false;

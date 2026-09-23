@@ -112,7 +112,7 @@ Connection::Connection() : impl_(std::make_unique<Impl>()) {
     x.display = XOpenDisplay(nullptr);
     if (!x.display)
         throw std::runtime_error(
-            "Could not connect to an X server. On Wayland desktops UsageTracker runs through "
+            "Could not connect to an X server. On Wayland desktops BarTab runs through "
             "XWayland; check that DISPLAY is set.");
     XSetErrorHandler(ignore_error);
     x.screen = DefaultScreen(x.display);
@@ -172,8 +172,8 @@ WindowId Connection::create(Role role, Rect bounds, const std::string& title) {
     XChangeProperty(x.display, window, x.atom("_NET_WM_NAME"), x.atom("UTF8_STRING"), 8, PropModeReplace,
                     reinterpret_cast<const unsigned char*>(title.data()), static_cast<int>(title.size()));
     XClassHint* hint = XAllocClassHint();
-    hint->res_name = const_cast<char*>("usagetracker");
-    hint->res_class = const_cast<char*>("UsageTracker");
+    hint->res_name = const_cast<char*>("bartab");
+    hint->res_class = const_cast<char*>("BarTab");
     XSetClassHint(x.display, window, hint);
     XFree(hint);
     x.set_cardinals(window, "_NET_WM_PID", {static_cast<long>(getpid())});
@@ -388,7 +388,7 @@ Monitor Connection::monitor_at(int px, int py) {
 }
 
 float Connection::scale() {
-    if (const char* forced = std::getenv("USAGETRACKER_SCALE")) {
+    if (const char* forced = std::getenv("BARTAB_SCALE")) {
         const float value = std::strtof(forced, nullptr);
         if (value >= 0.5f && value <= 4.f)
             return value;

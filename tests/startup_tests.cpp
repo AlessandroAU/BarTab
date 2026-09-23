@@ -26,7 +26,7 @@ template <typename Registered> bool round_trip(Registered registered) {
 int main() {
 #ifdef _WIN32
     // Sandbox HKCU so the test never touches the real Run key.
-    const auto sandbox = L"Software\\UsageTrackerStartupTest-" + std::to_wstring(GetCurrentProcessId());
+    const auto sandbox = L"Software\\BarTabStartupTest-" + std::to_wstring(GetCurrentProcessId());
     HKEY key{};
     if (RegCreateKeyExW(HKEY_CURRENT_USER, sandbox.c_str(), 0, nullptr, 0, KEY_ALL_ACCESS, nullptr, &key,
                         nullptr) != ERROR_SUCCESS)
@@ -36,13 +36,23 @@ int main() {
         RegDeleteTreeW(HKEY_CURRENT_USER, sandbox.c_str());
         return 1;
     }
-    const bool ok = round_trip([] {
-        wchar_t command[32768]{};
-        DWORD bytes = sizeof(command);
-        return RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-                            L"UsageTracker", RRF_RT_REG_SZ, nullptr, command, &bytes) == ERROR_SUCCESS &&
-               std::wstring(command) == L"\"" + executable_path().wstring() + L"\"";
-    });
+    const auto run = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    const auto command = [&](const wchar_t* name) {
+        wchar_t value[32768]{};
+        DWORD bytes = sizeof(value);
+        return RegGetValueW(HKEY_CURRENT_USER, run, name, RRF_RT_REG_SZ, nullptr, value, &bytes) == ERROR_SUCCESS
+                   ? std::wstring(value)
+                   : std::wstring{};
+    };
+    bool ok = round_trip([&] { return command(L"BarTab") == L"\"" + executable_path().wstring() + L"\""; });
+    // An entry from when the app was called UsageTracker moves to the new name
+    // and executable, still switched on.
+    const std::wstring previous = L"\"C:\\Tools\\UsageTracker\\UsageTracker.exe\"";
+    ok = ok && RegSetKeyValueW(HKEY_CURRENT_USER, run, L"UsageTracker", REG_SZ, previous.c_str(),
+                               static_cast<DWORD>((previous.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
+    ok = ok && startup_state().enabled && command(L"UsageTracker").empty() &&
+         command(L"BarTab") == L"\"C:\\Tools\\UsageTracker\\BarTab.exe\"";
+    ok = ok && set_startup(false).empty();
     RegOverridePredefKey(HKEY_CURRENT_USER, nullptr);
     RegCloseKey(key);
     RegDeleteTreeW(HKEY_CURRENT_USER, sandbox.c_str());
@@ -55,9 +65,9 @@ int main() {
     setenv("HOME", sandbox.c_str(), 1);
     setenv("XDG_CONFIG_HOME", (sandbox / "config").c_str(), 1);
 #ifdef __APPLE__
-    const auto entry = sandbox / "Library/LaunchAgents/com.usagetracker.app.plist";
+    const auto entry = sandbox / "Library/LaunchAgents/com.bartab.app.plist";
 #else
-    const auto entry = sandbox / "config/autostart/UsageTracker.desktop";
+    const auto entry = sandbox / "config/autostart/BarTab.desktop";
 #endif
     const auto read = [&] {
         std::ifstream file(entry);
@@ -74,6 +84,18 @@ int main() {
         file << "Hidden=true\n";
     }
     ok = ok && !startup_state().enabled && set_startup(false).empty();
+    // An entry from when the app was called UsageTracker moves to the new name
+    // and executable, still switched on.
+    const auto previous = entry.parent_path() / "UsageTracker.desktop";
+    {
+        std::ofstream file(previous);
+        file << "[Desktop Entry]\nType=Application\nName=UsageTracker\n"
+                "Exec=\"/opt/UsageTracker/UsageTracker\"\nX-GNOME-Autostart-enabled=true\n";
+    }
+    ok = ok && startup_state().enabled && !std::filesystem::exists(previous) &&
+         read().find("Name=BarTab\n") != std::string::npos &&
+         read().find("Exec=\"/opt/UsageTracker/BarTab\"") != std::string::npos;
+    ok = ok && set_startup(false).empty();
 #endif
     std::error_code ignored;
     std::filesystem::remove_all(sandbox, ignored);

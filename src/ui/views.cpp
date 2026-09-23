@@ -1375,7 +1375,7 @@ void View::demo_settings(Frame& result, ClayWidgets_Input input) {
         auto root = column(24, 14);
         root.layout.sizing.height = CLAY_SIZING_GROW(0);
         CLAY (CLAY_ID("Settings"), root) {
-            text("UsageTracker", 26, {236, 243, 250, 255});
+            text("BarTab", 26, {236, 243, 250, 255});
             text("Appearance", 17, {236, 243, 250, 255});
             auto& a = preferences_.appearance;
             result.changed = setting_slider("TextSizeSlider", "Taskbar text size", a.text_percent,

@@ -54,7 +54,7 @@ std::string ProviderProtocol::initialize() const {
             .dump();
     return Json{{"id", 1},
                 {"method", "initialize"},
-                {"params", {{"clientInfo", {{"name", "usage_tracker"}, {"version", "0.4.0"}}}}}}
+                {"params", {{"clientInfo", {{"name", "bartab"}, {"version", "0.4.0"}}}}}}
         .dump();
 }
 ProtocolReply ProviderProtocol::receive(std::string_view line) const {

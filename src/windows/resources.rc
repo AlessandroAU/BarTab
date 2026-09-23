@@ -1,2 +1,2 @@
 #include "resource.h"
-IDI_USAGE_TRACKER ICON "usage-tracker.ico"
+IDI_BARTAB ICON "bartab.ico"

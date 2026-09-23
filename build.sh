@@ -26,9 +26,9 @@ cmake -S "$root" -B "$root/build" $generator -DCMAKE_BUILD_TYPE="$configuration"
 }
 # Stop installed and build-tree instances so their executables can be replaced.
 # Match the executable path: process names are cut to 15 characters.
-pkill -f '/UsageTracker( |$)' 2>/dev/null || true
-pkill -f '/UsageTrackerDebug( |$)' 2>/dev/null || true
+pkill -f '/BarTab( |$)' 2>/dev/null || true
+pkill -f '/BarTabDebug( |$)' 2>/dev/null || true
 cmake --build "$root/build" --parallel
 ctest --test-dir "$root/build" --output-on-failure
 cmake --install "$root/build" --prefix "$root/bin"
-echo "Built and tested $root/bin/UsageTracker and the mock-provider UsageTrackerDebug"
+echo "Built and tested $root/bin/BarTab and the mock-provider BarTabDebug"

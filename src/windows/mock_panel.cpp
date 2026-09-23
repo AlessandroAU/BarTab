@@ -10,7 +10,7 @@
 
 namespace usage::windows {
 namespace {
-constexpr wchar_t panel_class[] = L"UsageTracker.MockPanel.Cpp";
+constexpr wchar_t panel_class[] = L"BarTab.MockPanel.Cpp";
 constexpr int preset_id = 900, reset_button_id = 910;
 constexpr int state_field = 1, plan_field = 2, model_name_field = 3, credits_field = 4, earned_field = 5;
 constexpr int present_field = 10, used_field = 11, resets_field = 12;
@@ -77,7 +77,7 @@ MockPanel::MockPanel(std::shared_ptr<host::MockProviders> providers, std::functi
     cls.lpszClassName = panel_class;
     if (!RegisterClassExW(&cls))
         throw std::runtime_error("Could not register the mock panel class");
-    window_ = CreateWindowExW(0, panel_class, L"UsageTracker - Mock providers",
+    window_ = CreateWindowExW(0, panel_class, L"BarTab - Mock providers",
                               WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, CW_USEDEFAULT,
                               CW_USEDEFAULT, 100, 100, nullptr, nullptr, cls.hInstance, this);
     if (!window_)

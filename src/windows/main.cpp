@@ -1,12 +1,12 @@
 #include "windows/app.hpp"
 #include "windows/platform.hpp"
 #include <exception>
-#ifdef USAGETRACKER_MOCK
+#ifdef BARTAB_MOCK
 #include "windows/mock_panel.hpp"
 // The debug build runs beside an installed copy, so it takes its own mutex.
-constexpr wchar_t instance_mutex[] = L"Local\\UsageTracker.Debug";
+constexpr wchar_t instance_mutex[] = L"Local\\BarTab.Debug";
 #else
-constexpr wchar_t instance_mutex[] = L"Local\\UsageTracker.Prototype";
+constexpr wchar_t instance_mutex[] = L"Local\\BarTab.Prototype";
 #endif
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
@@ -34,7 +34,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     LocalFree(arguments);
     int result = 1;
     try {
-#ifdef USAGETRACKER_MOCK
+#ifdef BARTAB_MOCK
         constexpr bool mock_build = true;
 #else
         constexpr bool mock_build = false;
@@ -46,7 +46,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             usage::windows::log(error ? L"Could not remove the settings file."
                                       : L"Settings reset from the command line.");
         }
-#ifdef USAGETRACKER_MOCK
+#ifdef BARTAB_MOCK
         using namespace usage::windows;
         // Smoke tests keep their fixed demo data; the panel drives everything else.
         auto mock =

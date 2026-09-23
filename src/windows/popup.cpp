@@ -268,7 +268,7 @@ void App::open_details(bool settings) {
     settings = settings || usage_.live;
     hide_hover();
     if (!popup_) {
-        popup_ = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, popup_class, L"UsageTracker - demo",
+        popup_ = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, popup_class, L"BarTab - demo",
                                  WS_POPUP, CW_USEDEFAULT, CW_USEDEFAULT, 360, 370, controller_, nullptr,
                                  GetModuleHandleW(nullptr), this);
         if (!popup_)
@@ -287,7 +287,7 @@ void App::open_details(bool settings) {
     providers_.detect();
     details_view_.set_surface(settings ? ui::Surface::Settings : ui::Surface::Details);
     details_view_.set_preferences(preferences_);
-    SetWindowTextW(popup_, settings ? L"UsageTracker - Settings and usage" : L"UsageTracker - Demo");
+    SetWindowTextW(popup_, settings ? L"BarTab - Settings and usage" : L"BarTab - Demo");
     details_view_.reset_focus();
     details_pointer_ = {};
     details_pointer_.mouseX = details_pointer_.mouseY = -100;

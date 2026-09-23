@@ -75,13 +75,23 @@ std::filesystem::path executable_path() {
 std::filesystem::path executable_directory() {
     return executable_path().parent_path();
 }
-// Settings and the log both live in %LOCALAPPDATA%\UsageTracker.
+// Settings and the log both live in %LOCALAPPDATA%\BarTab.
 std::filesystem::path config_directory() {
     wchar_t local[32768]{};
     const auto length = GetEnvironmentVariableW(L"LOCALAPPDATA", local, static_cast<DWORD>(std::size(local)));
     if (!length || length >= std::size(local))
         return {};
-    return std::filesystem::path(local) / L"UsageTracker";
+    const auto directory = std::filesystem::path(local) / L"BarTab";
+    // The app was called UsageTracker; its folder moves over once, settings intact.
+    static const bool adopted = [&] {
+        std::error_code error;
+        const auto previous = directory.parent_path() / L"UsageTracker";
+        if (!std::filesystem::exists(directory, error) && std::filesystem::is_directory(previous, error))
+            std::filesystem::rename(previous, directory, error);
+        return true;
+    }();
+    (void)adopted;
+    return directory;
 }
 std::filesystem::path log_path() {
     const auto directory = config_directory();

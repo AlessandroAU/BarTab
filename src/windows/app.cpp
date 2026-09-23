@@ -15,7 +15,7 @@ App::App(bool smoke, bool live_test, std::shared_ptr<host::MockProviders> mock)
     register_class(hover_class, hover_proc);
     register_class(confetti_class, confetti_proc);
     controller_ =
-        CreateWindowExW(WS_EX_TOOLWINDOW, controller_class, L"UsageTracker controller", WS_OVERLAPPED, 0, 0,
+        CreateWindowExW(WS_EX_TOOLWINDOW, controller_class, L"BarTab controller", WS_OVERLAPPED, 0, 0,
                         0, 0, nullptr, nullptr, GetModuleHandleW(nullptr), this);
     if (!controller_)
         throw std::runtime_error("Could not create controller window");
@@ -109,8 +109,8 @@ void App::register_class(const wchar_t* name, WNDPROC procedure) {
     cls.lpfnWndProc = procedure;
     cls.hInstance = GetModuleHandleW(nullptr);
     cls.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    cls.hIcon = LoadIconW(cls.hInstance, MAKEINTRESOURCEW(IDI_USAGE_TRACKER));
-    cls.hIconSm = static_cast<HICON>(LoadImageW(cls.hInstance, MAKEINTRESOURCEW(IDI_USAGE_TRACKER),
+    cls.hIcon = LoadIconW(cls.hInstance, MAKEINTRESOURCEW(IDI_BARTAB));
+    cls.hIconSm = static_cast<HICON>(LoadImageW(cls.hInstance, MAKEINTRESOURCEW(IDI_BARTAB),
                                                 IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
                                                 GetSystemMetrics(SM_CYSMICON), LR_SHARED));
     cls.lpszClassName = name;
@@ -188,14 +188,14 @@ void App::add_tray() {
     tray_.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     tray_.uCallbackMessage = tray_message;
     tray_.hIcon = static_cast<HICON>(
-        LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_USAGE_TRACKER), IMAGE_ICON,
+        LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_BARTAB), IMAGE_ICON,
                    GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_SHARED));
     update_tooltip();
     Shell_NotifyIconW(NIM_ADD, &tray_);
 }
 
 void App::update_tooltip() {
-    std::wstring text = mock_ ? L"UsageTracker (mock providers)" : L"UsageTracker";
+    std::wstring text = mock_ ? L"BarTab (mock providers)" : L"BarTab";
     if (usage_.live) {
         for (const auto& entry : {std::pair<const wchar_t*, const AccountUsage*>{L"Codex", &usage_.codex},
                                   {L"Claude", &usage_.claude}}) {
@@ -209,7 +209,7 @@ void App::update_tooltip() {
                         std::to_wstring(window.remaining) + L"% ";
         }
     } else
-        text = L"UsageTracker - demo data";
+        text = L"BarTab - demo data";
     wcsncpy_s(tray_.szTip, text.c_str(), _TRUNCATE);
 }
 

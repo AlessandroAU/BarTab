@@ -40,7 +40,7 @@ bool App::save_settings(Preferences value) {
     if (!host::write_settings(settings_path_, value)) {
         MessageBoxW(popup_,
                     L"Could not save your preferences. Check that your local app data folder is writable.",
-                    L"UsageTracker settings", MB_OK | MB_ICONERROR);
+                    L"BarTab settings", MB_OK | MB_ICONERROR);
         return false;
     }
     apply_preferences(value);

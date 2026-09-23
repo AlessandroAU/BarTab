@@ -27,30 +27,30 @@ int main(int argc, char** argv) {
         smoke = smoke || argument == "--smoke-test";
         reset = reset || argument == "--reset";
     }
-#ifdef USAGETRACKER_MOCK
+#ifdef BARTAB_MOCK
     // The debug build runs beside an installed copy, so it takes its own lock.
-    std::string instance = "UsageTrackerDebug";
+    std::string instance = "BarTabDebug";
 #else
-    std::string instance = "UsageTracker";
+    std::string instance = "BarTab";
 #endif
     // The self-test must not collide with a running copy.
     if (smoke)
         instance += "-smoke";
     if (!claim_instance(instance)) {
-        std::cerr << "UsageTracker is already running.\n";
+        std::cerr << "BarTab is already running.\n";
         return 2;
     }
     try {
-#ifdef USAGETRACKER_MOCK
+#ifdef BARTAB_MOCK
         constexpr bool mock_build = true;
 #else
         constexpr bool mock_build = false;
 #endif
         // Start over from the defaults: settings and the widget's place.
         if (reset && !smoke && !usage::linux_host::App::reset_configuration(mock_build))
-            std::cerr << "UsageTracker: could not remove the saved configuration.\n";
+            std::cerr << "BarTab: could not remove the saved configuration.\n";
         std::shared_ptr<usage::host::MockProviders> mock;
-#ifdef USAGETRACKER_MOCK
+#ifdef BARTAB_MOCK
         // Smoke tests keep their fixed demo data; middle-click cycles scenarios otherwise.
         if (!smoke)
             mock = std::make_shared<usage::host::MockProviders>(usage::mock_presets().front().scenario);
@@ -59,7 +59,7 @@ int main(int argc, char** argv) {
         return app.run();
     } catch (const std::exception& error) {
         usage::host::log(std::string("Fatal error: ") + error.what());
-        std::cerr << "UsageTracker: " << error.what() << '\n';
+        std::cerr << "BarTab: " << error.what() << '\n';
         return 1;
     }
 }

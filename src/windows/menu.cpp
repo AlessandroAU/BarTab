@@ -50,7 +50,7 @@ void App::choose_menu(ui::Frame::MenuChoice choice) {
         const auto error = host::set_startup(!host::startup_state().enabled);
         if (!error.empty()) {
             const auto message = L"Could not change Start at boot.\n\n" + widen(error);
-            MessageBoxW(controller_, message.c_str(), L"UsageTracker", MB_OK | MB_ICONERROR);
+            MessageBoxW(controller_, message.c_str(), L"BarTab", MB_OK | MB_ICONERROR);
         }
         break;
     }

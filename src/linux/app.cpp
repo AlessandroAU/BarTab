@@ -445,7 +445,7 @@ Rect App::panel_strip(const x11::Monitor& monitor, Dock dock) {
 void App::place_widget() {
     const auto target = widget_target();
     if (!widget_) {
-        widget_ = x_.create(x11::Role::Widget, target, "UsageTracker");
+        widget_ = x_.create(x11::Role::Widget, target, "BarTab");
         widget_bounds_ = target;
         x_.show(widget_);
         paint_widget();
@@ -720,7 +720,7 @@ void App::open_details(bool settings) {
     settings = settings || usage_.live;
     hide_hover();
     if (!popup_)
-        popup_ = x_.create(x11::Role::Dialog, {0, 0, 1, 1}, "UsageTracker - Settings and usage");
+        popup_ = x_.create(x11::Role::Dialog, {0, 0, 1, 1}, "BarTab - Settings and usage");
     if (x_.visible(popup_) && settings_mode_ == settings) {
         x_.activate(popup_, x_.last_input_time());
         return;
@@ -943,7 +943,7 @@ void App::details_event(const x11::Event& event) {
 void App::show_menu() {
     hide_hover(true);
     if (!menu_)
-        menu_ = x_.create(x11::Role::Menu, {0, 0, 1, 1}, "UsageTracker menu");
+        menu_ = x_.create(x11::Role::Menu, {0, 0, 1, 1}, "BarTab menu");
     ui::MenuModel model;
     const auto startup = host::startup_state();
     model.startup_enabled = startup.enabled;
@@ -1082,7 +1082,7 @@ void App::celebrate() {
         widget.empty())
         return;
     if (!confetti_window_)
-        confetti_window_ = x_.create(x11::Role::Overlay, {0, 0, 1, 1}, "UsageTracker confetti");
+        confetti_window_ = x_.create(x11::Role::Overlay, {0, 0, 1, 1}, "BarTab confetti");
     if (confetti_.done()) {
         const auto monitor = x_.monitor_at(widget.x + widget.width / 2, widget.y + widget.height / 2).bounds;
         const int spread = round(confetti_spread * scale_), rise = round(confetti_rise * scale_);

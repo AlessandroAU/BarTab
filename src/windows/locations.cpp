@@ -23,7 +23,7 @@ std::filesystem::path unquote(std::wstring value) {
 DiscoveryLocations search_locations(Service service) {
     const bool claude = service == Service::Claude;
     DiscoveryLocations locations;
-    locations.override_path = unquote(environment(claude ? L"USAGETRACKER_CLAUDE" : L"USAGETRACKER_CODEX"));
+    locations.override_path = unquote(environment(claude ? L"BARTAB_CLAUDE" : L"BARTAB_CODEX"));
     const auto search = environment(L"PATH");
     for (std::size_t start = 0; start < search.size();) {
         auto end = search.find(L';', start);

@@ -7,7 +7,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
-#ifdef USAGETRACKER_HAVE_GIO
+#ifdef BARTAB_HAVE_GIO
 #include <gio/gio.h>
 #endif
 
@@ -34,7 +34,7 @@ struct Desktop {
     bool animations{true};
     std::string font_family;
 };
-#ifdef USAGETRACKER_HAVE_GIO
+#ifdef BARTAB_HAVE_GIO
 // One key from the XDG desktop portal's Settings interface, which GNOME, KDE
 // and other desktops running xdg-desktop-portal all serve.
 GVariant* portal_setting(GDBusConnection* bus, const char* space, const char* key) {
@@ -67,7 +67,7 @@ GSettings* settings_for(const char* schema) {
 #endif
 Desktop read_desktop() {
     Desktop result;
-#ifdef USAGETRACKER_HAVE_GIO
+#ifdef BARTAB_HAVE_GIO
     static GDBusConnection* bus = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, nullptr);
     static GSettings* interface = settings_for("org.gnome.desktop.interface");
     std::optional<std::uint32_t> scheme;
@@ -142,11 +142,23 @@ std::filesystem::path executable_directory() {
 }
 std::filesystem::path config_directory() {
     const auto base = xdg_directory("XDG_CONFIG_HOME", ".config");
-    return base.empty() ? base : base / "UsageTracker";
+    if (base.empty())
+        return base;
+    // The app was called UsageTracker; its settings and widget position move
+    // over once.
+    static const bool adopted = [&] {
+        std::error_code error;
+        if (!std::filesystem::exists(base / "BarTab", error) &&
+            std::filesystem::is_directory(base / "UsageTracker", error))
+            std::filesystem::rename(base / "UsageTracker", base / "BarTab", error);
+        return true;
+    }();
+    (void)adopted;
+    return base / "BarTab";
 }
 std::filesystem::path log_path() {
     const auto base = xdg_directory("XDG_STATE_HOME", ".local/state");
-    return base.empty() ? base : base / "UsageTracker" / "usagetracker.log";
+    return base.empty() ? base : base / "BarTab" / "bartab.log";
 }
 // The panel and application windows share one color scheme on Linux desktops.
 bool system_light_theme() {

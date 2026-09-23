@@ -288,7 +288,7 @@ App::Placement App::place(TaskbarWidget& widget, const Snapshot& snapshot) {
     if (!widget.window) {
         const auto previous = SetThreadDpiAwarenessContext(GetWindowDpiAwarenessContext(snapshot.taskbar));
         widget.window = CreateWindowExW(WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, widget_class,
-                                        L"UsageTracker taskbar widget", WS_CHILD, 0, 0, target.width,
+                                        L"BarTab taskbar widget", WS_CHILD, 0, 0, target.width,
                                         target.height, snapshot.taskbar, nullptr, GetModuleHandleW(nullptr), this);
         SetThreadDpiAwarenessContext(previous);
         widget.taskbar = snapshot.taskbar;
@@ -496,7 +496,7 @@ void App::celebrate() {
     if (!confetti_window_) {
         confetti_window_ =
             CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
-                            confetti_class, L"UsageTracker confetti", WS_POPUP, 0, 0, 0, 0, controller_, nullptr,
+                            confetti_class, L"BarTab confetti", WS_POPUP, 0, 0, 0, 0, controller_, nullptr,
                             GetModuleHandleW(nullptr), this);
         if (!confetti_window_)
             return;

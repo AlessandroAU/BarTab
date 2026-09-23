@@ -19,9 +19,9 @@ if errorlevel 1 (
     exit /b 1
 )
 rem Stop installed and build-tree instances so their executables are not locked.
-taskkill /F /IM UsageTracker.exe >nul 2>&1
-taskkill /F /IM UsageTrackerDebug.exe >nul 2>&1
-taskkill /F /IM UsageTrackerDebug.exe >nul 2>&1
+taskkill /F /IM BarTab.exe >nul 2>&1
+taskkill /F /IM BarTabDebug.exe >nul 2>&1
+taskkill /F /IM BarTabDebug.exe >nul 2>&1
 rem No existing process is normal; the build command supplies the next exit code.
 cmake --build "%~dp0build" --config "%configuration%"
 if errorlevel 1 exit /b 1
@@ -29,8 +29,8 @@ ctest --test-dir "%~dp0build" -C "%configuration%" --output-on-failure
 if errorlevel 1 exit /b 1
 cmake --install "%~dp0build" --config "%configuration%" --prefix "%~dp0bin"
 if errorlevel 1 (
-    echo Could not install the executable. Quit UsageTracker before rebuilding.
+    echo Could not install the executable. Quit BarTab before rebuilding.
     exit /b 1
 )
-echo Built and tested %~dp0bin\UsageTracker.exe and the mock-provider UsageTrackerDebug.exe
+echo Built and tested %~dp0bin\BarTab.exe and the mock-provider BarTabDebug.exe
 exit /b 0

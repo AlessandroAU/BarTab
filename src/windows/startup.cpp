@@ -2,11 +2,14 @@
 #include "windows/platform.hpp"
 #include <windows.h>
 #include <string>
+#include <string_view>
 
 namespace usage::host {
 namespace {
 constexpr wchar_t key[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-constexpr wchar_t name[] = L"UsageTracker";
+constexpr wchar_t name[] = L"BarTab";
+// The entry the app registered while it was called UsageTracker.
+constexpr wchar_t previous_name[] = L"UsageTracker";
 std::string describe(LSTATUS status) {
     wchar_t detail[512]{};
     FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr,
@@ -37,6 +40,24 @@ LSTATUS register_executable() {
 }
 } // namespace
 StartupState startup_state() {
+    // An entry left under the old name launches UsageTracker.exe, which the
+    // build now installs as BarTab.exe beside it: carry it over, renamed.
+    wchar_t previous[300]{};
+    DWORD previous_bytes = sizeof(previous);
+    if (RegGetValueW(HKEY_CURRENT_USER, key, previous_name, RRF_RT_REG_SZ, nullptr, previous, &previous_bytes) ==
+        ERROR_SUCCESS) {
+        std::wstring command = previous;
+        constexpr std::wstring_view old_exe = L"UsageTracker.exe", new_exe = L"BarTab.exe";
+        if (const auto at = command.rfind(old_exe); at != std::wstring::npos)
+            command.replace(at, old_exe.size(), new_exe);
+        HKEY opened{};
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, key, 0, KEY_SET_VALUE, &opened) == ERROR_SUCCESS) {
+            if (RegSetValueExW(opened, name, 0, REG_SZ, reinterpret_cast<const BYTE*>(command.c_str()),
+                               static_cast<DWORD>((command.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS)
+                RegDeleteValueW(opened, previous_name);
+            RegCloseKey(opened);
+        }
+    }
     DWORD bytes{};
     const auto status = RegGetValueW(HKEY_CURRENT_USER, key, name, RRF_RT_REG_SZ, nullptr, nullptr, &bytes);
     if (status == ERROR_FILE_NOT_FOUND || status == ERROR_PATH_NOT_FOUND)

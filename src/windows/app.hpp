@@ -12,10 +12,10 @@ namespace usage::windows {
 inline constexpr UINT tray_message = WM_APP + 1;
 // One per display refresh from the FrameClock while anything animates.
 inline constexpr UINT frame_message = WM_APP + 2;
-inline constexpr wchar_t controller_class[] = L"UsageTracker.Controller.Cpp";
-inline constexpr wchar_t popup_class[] = L"UsageTracker.Popup.Cpp";
-inline constexpr wchar_t hover_class[] = L"UsageTracker.Hover.Cpp";
-inline constexpr wchar_t confetti_class[] = L"UsageTracker.Confetti.Cpp";
+inline constexpr wchar_t controller_class[] = L"BarTab.Controller.Cpp";
+inline constexpr wchar_t popup_class[] = L"BarTab.Popup.Cpp";
+inline constexpr wchar_t hover_class[] = L"BarTab.Hover.Cpp";
+inline constexpr wchar_t confetti_class[] = L"BarTab.Confetti.Cpp";
 
 // A widget embedded in one taskbar, with its screen bounds.
 struct TaskbarWidget {

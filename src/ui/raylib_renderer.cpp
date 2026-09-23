@@ -28,7 +28,7 @@ struct Renderer::Impl {
     Impl() {
         SetTraceLogLevel(LOG_WARNING);
         SetConfigFlags(FLAG_WINDOW_HIDDEN);
-        InitWindow(1, 1, "UsageTracker rendering context");
+        InitWindow(1, 1, "BarTab rendering context");
         if (!IsWindowReady())
             throw std::runtime_error("Could not create the raylib OpenGL context");
         fonts.fallback = GetFontDefault();

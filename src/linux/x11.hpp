@@ -90,7 +90,7 @@ class Connection {
     void pointer(int& x, int& y);
     // The monitor containing (x, y), or the nearest one. `work` excludes panels.
     Monitor monitor_at(int x, int y);
-    // Logical-to-physical pixel scale: Xft.dpi / 96, or USAGETRACKER_SCALE.
+    // Logical-to-physical pixel scale: Xft.dpi / 96, or BARTAB_SCALE.
     float scale();
     unsigned long last_input_time() const;
 

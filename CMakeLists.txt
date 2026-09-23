@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.22)
-project(UsageTracker VERSION 0.3.0 LANGUAGES C CXX)
+project(BarTab VERSION 0.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-option(USAGETRACKER_ENABLE_LTO "Enable link-time optimization in Release and MinSizeRel" ON)
-if(USAGETRACKER_ENABLE_LTO)
+option(BARTAB_ENABLE_LTO "Enable link-time optimization in Release and MinSizeRel" ON)
+if(BARTAB_ENABLE_LTO)
     include(CheckIPOSupported)
     check_ipo_supported(LANGUAGES C CXX)
     # Set before creating targets so static dependencies also participate.
@@ -27,7 +27,7 @@ if(MSVC)
     endforeach()
     # MSVC emits debug symbols separately; omit release debug records and PDBs.
     add_link_options("$<$<CONFIG:Release,MinSizeRel>:/OPT:REF;/OPT:ICF;/INCREMENTAL:NO;/DEBUG:NONE>")
-    if(USAGETRACKER_ENABLE_LTO)
+    if(BARTAB_ENABLE_LTO)
         # Full link-time code generation, never MSBuild's incremental default.
         # MSVC 19.41's /LTCG:incremental reused stale code for callers of a
         # changed inline function: after clay-widgets' TabEx changed, only 4 of
@@ -142,8 +142,8 @@ add_library(usage_renderer STATIC src/ui/raylib_renderer.cpp)
 target_compile_definitions(usage_renderer PRIVATE CLAY_WIDGETS_FREETYPE)
 if(WIN32)
     # raylib's C API name collides with user32's CloseWindow in a native host.
-    target_compile_definitions(raylib PRIVATE CloseWindow=UsageTrackerRaylibCloseWindow)
-    target_compile_definitions(usage_renderer PRIVATE CloseWindow=UsageTrackerRaylibCloseWindow)
+    target_compile_definitions(raylib PRIVATE CloseWindow=BarTabRaylibCloseWindow)
+    target_compile_definitions(usage_renderer PRIVATE CloseWindow=BarTabRaylibCloseWindow)
 endif()
 target_include_directories(usage_renderer SYSTEM PRIVATE "${CLAY_WIDGETS_DIR}")
 target_link_libraries(usage_renderer PUBLIC usage_ui PRIVATE raylib freetype)
@@ -185,7 +185,7 @@ else()
         endif()
         if(GIO_FOUND)
             target_link_libraries(usage_host PRIVATE PkgConfig::GIO)
-            target_compile_definitions(usage_host PRIVATE USAGETRACKER_HAVE_GIO)
+            target_compile_definitions(usage_host PRIVATE BARTAB_HAVE_GIO)
         else()
             message(STATUS "GIO not found: the Linux host will not follow the desktop's theme, accent or font.")
         endif()
@@ -259,6 +259,13 @@ add_custom_target(docs-screenshots
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Rendering README screenshots")
 
+# Renders the README's demo clips: the real surfaces driven by a scripted pointer
+# on a painted desktop. src/tools/demo_media.py paints the desktop, runs this
+# once per scene and encodes the frames it streams with ffmpeg.
+add_executable(demo_frames src/tools/demo_frames.cpp)
+target_include_directories(demo_frames SYSTEM PRIVATE vendor/nlohmann)
+target_link_libraries(demo_frames PRIVATE usage_renderer usage_host)
+
 # ---- The desktop app: one native host per platform ----
 set(app_targets)
 if(WIN32)
@@ -280,16 +287,16 @@ if(WIN32)
     target_compile_definitions(usage_windows PUBLIC UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
     target_include_directories(usage_windows PUBLIC assets)
     target_link_libraries(usage_windows PUBLIC usage_renderer usage_host shell32 ole32 oleaut32 uiautomationcore)
-    add_executable(UsageTracker WIN32 src/windows/resources.rc src/windows/main.cpp)
-    target_link_libraries(UsageTracker PRIVATE usage_windows)
-    target_link_options(UsageTracker PRIVATE "/MANIFEST:EMBED" "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/app.manifest")
+    add_executable(BarTab WIN32 src/windows/resources.rc src/windows/main.cpp)
+    target_link_libraries(BarTab PRIVATE usage_windows)
+    target_link_options(BarTab PRIVATE "/MANIFEST:EMBED" "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/app.manifest")
     # The same app with mock provider endpoints and a control panel to set
     # them, for trying every provider combination without real accounts.
-    add_executable(UsageTrackerDebug WIN32 src/windows/resources.rc src/windows/main.cpp src/windows/mock_panel.cpp)
-    target_compile_definitions(UsageTrackerDebug PRIVATE USAGETRACKER_MOCK)
-    target_link_libraries(UsageTrackerDebug PRIVATE usage_windows comctl32)
-    target_link_options(UsageTrackerDebug PRIVATE "/MANIFEST:EMBED" "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/app.manifest")
-    list(APPEND app_targets UsageTracker UsageTrackerDebug)
+    add_executable(BarTabDebug WIN32 src/windows/resources.rc src/windows/main.cpp src/windows/mock_panel.cpp)
+    target_compile_definitions(BarTabDebug PRIVATE BARTAB_MOCK)
+    target_link_libraries(BarTabDebug PRIVATE usage_windows comctl32)
+    target_link_options(BarTabDebug PRIVATE "/MANIFEST:EMBED" "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/app.manifest")
+    list(APPEND app_targets BarTab BarTabDebug)
 elseif(APPLE)
     message(STATUS "macOS: building the portable libraries, host services and tests. The menu-bar host is not implemented yet.")
 else()
@@ -303,18 +310,18 @@ else()
         src/linux/x11.cpp
     )
     target_link_libraries(usage_linux PUBLIC usage_renderer usage_host X11::X11 X11::Xext X11::Xrandr)
-    add_executable(UsageTracker src/linux/main.cpp)
-    target_link_libraries(UsageTracker PRIVATE usage_linux)
+    add_executable(BarTab src/linux/main.cpp)
+    target_link_libraries(BarTab PRIVATE usage_linux)
     # The same app with mock provider endpoints; middle-click cycles scenarios.
-    add_executable(UsageTrackerDebug src/linux/main.cpp)
-    target_compile_definitions(UsageTrackerDebug PRIVATE USAGETRACKER_MOCK)
-    target_link_libraries(UsageTrackerDebug PRIVATE usage_linux)
-    list(APPEND app_targets UsageTracker UsageTrackerDebug)
+    add_executable(BarTabDebug src/linux/main.cpp)
+    target_compile_definitions(BarTabDebug PRIVATE BARTAB_MOCK)
+    target_link_libraries(BarTabDebug PRIVATE usage_linux)
+    list(APPEND app_targets BarTab BarTabDebug)
     if(BUILD_TESTING)
         # The live smoke test needs an X server; run it headless when Xvfb is available.
         find_program(XVFB_RUN xvfb-run)
         if(XVFB_RUN)
-            add_test(NAME linux_smoke COMMAND "${XVFB_RUN}" -a "$<TARGET_FILE:UsageTracker>" --smoke-test)
+            add_test(NAME linux_smoke COMMAND "${XVFB_RUN}" -a "$<TARGET_FILE:BarTab>" --smoke-test)
             set_tests_properties(linux_smoke PROPERTIES TIMEOUT 60)
         endif()
     endif()

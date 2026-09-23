@@ -10,7 +10,7 @@ std::filesystem::path agent_path() {
     const char* home = std::getenv("HOME");
     if (!home || !*home)
         return {};
-    return std::filesystem::path(home) / "Library/LaunchAgents/com.usagetracker.app.plist";
+    return std::filesystem::path(home) / "Library/LaunchAgents/com.bartab.app.plist";
 }
 std::string escaped(const std::string& value) {
     std::string result;
@@ -49,7 +49,7 @@ std::string set_startup(bool enabled) {
             "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" "
             "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
             "<plist version=\"1.0\">\n<dict>\n"
-            "  <key>Label</key><string>com.usagetracker.app</string>\n"
+            "  <key>Label</key><string>com.bartab.app</string>\n"
             "  <key>ProgramArguments</key><array><string>"
          << escaped(executable_path().string())
          << "</string></array>\n"
