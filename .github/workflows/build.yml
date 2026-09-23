@@ -1,0 +1,113 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    # build.bat uses the Visual Studio 2022 generator.
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Build, test and install
+        shell: cmd
+        run: build.bat Release
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $package = "BarTab-windows-x64"
+          New-Item -ItemType Directory $package | Out-Null
+          Copy-Item bin\BarTab.exe, bin\licenses $package -Recurse
+          Compress-Archive $package "$package.zip"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: BarTab-windows-x64
+          path: BarTab-windows-x64.zip
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-24.04
+    # Built against glibc 2.28 so the binary runs on Debian 10, Ubuntu 20.04,
+    # RHEL 8 and anything newer. gcc-toolset links the parts of libstdc++ newer
+    # than the system's into the executable, so only old system libraries are needed.
+    container: almalinux:8
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Git must be present before checkout, or submodules are not fetched.
+      - name: Install dependencies
+        run: |
+          dnf install -y dnf-plugins-core epel-release
+          dnf config-manager --set-enabled powertools
+          dnf install -y git gcc-toolset-14 cmake ninja-build pkgconf-pkg-config binutils procps-ng \
+            libX11-devel libXext-devel libXrandr-devel libXinerama-devel libXcursor-devel libXi-devel \
+            mesa-libGL-devel fontconfig-devel glib2-devel \
+            xorg-x11-server-Xvfb xorg-x11-xauth xorg-x11-utils mesa-dri-drivers which
+
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      # Also runs the X11 smoke test under Xvfb.
+      - name: Build, test and install
+        run: |
+          source /opt/rh/gcc-toolset-14/enable
+          ./build.sh Release
+
+      - name: Check glibc and libstdc++ versions
+        run: |
+          newest() { objdump -T bin/BarTab | grep -o "$1[0-9.]*" | sort -uV | tail -n 1; }
+          glibc=$(newest 'GLIBC_2\.'); glibcxx=$(newest 'GLIBCXX_3\.4\.')
+          echo "Needs $glibc and ${glibcxx:-no libstdc++}"
+          [ "$(printf '%s\n' "$glibc" GLIBC_2.28 | sort -V | tail -n 1)" = GLIBC_2.28 ] || { echo "Needs a glibc newer than 2.28"; exit 1; }
+          [ -z "$glibcxx" ] || [ "$(printf '%s\n' "$glibcxx" GLIBCXX_3.4.25 | sort -V | tail -n 1)" = GLIBCXX_3.4.25 ] \
+            || { echo "Needs a libstdc++ newer than GCC 8's"; exit 1; }
+
+      # A tarball keeps the executable bit, which artifact uploads drop.
+      - name: Package
+        run: |
+          package=BarTab-linux-x64
+          mkdir "$package"
+          cp -r bin/BarTab bin/licenses "$package"
+          tar -czf "$package.tar.gz" "$package"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: BarTab-linux-x64
+          path: BarTab-linux-x64.tar.gz
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          merge-multiple: true
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes
+          BarTab-windows-x64.zip BarTab-linux-x64.tar.gz

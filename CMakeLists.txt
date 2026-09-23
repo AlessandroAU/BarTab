@@ -319,9 +319,12 @@ else()
     list(APPEND app_targets BarTab BarTabDebug)
     if(BUILD_TESTING)
         # The live smoke test needs an X server; run it headless when Xvfb is available.
+        # A fixed screen: some distributions' xvfb-run default to 640x480 at 8 bits,
+        # where the hover card opens under the pointer and settings do not fit.
         find_program(XVFB_RUN xvfb-run)
         if(XVFB_RUN)
-            add_test(NAME linux_smoke COMMAND "${XVFB_RUN}" -a "$<TARGET_FILE:BarTab>" --smoke-test)
+            add_test(NAME linux_smoke COMMAND "${XVFB_RUN}" -a -s "-screen 0 1920x1080x24"
+                "$<TARGET_FILE:BarTab>" --smoke-test)
             set_tests_properties(linux_smoke PROPERTIES TIMEOUT 60)
         endif()
     endif()
