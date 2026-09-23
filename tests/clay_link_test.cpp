@@ -1,6 +1,6 @@
 // Verify that consumers can link the compiled library without implementation macros.
 #include <clay.h>
-#include <clay-widgets.h>
+#include <clay-widgets/widgets.h>
 #include <cstdlib>
 #include <iostream>
 #include <memory>

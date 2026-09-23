@@ -1,28 +1,17 @@
-# Vendored dependencies
+# Third-party dependencies
 
-These files are part of the source tree. Building does not clone repositories, fetch packages, or require the exploratory checkout in `third_party/`.
-
-| Dependency | Upstream revision | Included files | License |
+| Dependency | How it is included | Revision | License |
 | --- | --- | --- | --- |
-| [Clay](https://github.com/nicbarker/clay) | `e6cc36941ab2af5d81107617039d6f527a1c660b` | `clay/clay.h` (unmodified), `clay/LICENSE.md` | zlib |
-| [clay-widgets](https://github.com/AlessandroAU/clay-widgets) | `f6e955be6e5df9c23ac48966233c5caf16a3c176` | `clay-widgets/clay-widgets.h` amalgam, headless test suite, MIT license | MIT |
-| [raylib](https://github.com/raysan5/raylib) | `caadb48e259028233515777a3e6402040c497309` | Source, bundled GLFW, CMake files and licenses | zlib; bundled licenses retained in source |
-| clay-widgets raylib backend | Same clay-widgets revision above | `clay-widgets/backends/raylib/` | MIT |
-| [nlohmann/json](https://github.com/nlohmann/json) | `v3.11.3` | Unmodified single header `nlohmann/json.hpp` and `LICENSE.MIT` | MIT |
-| Roboto Regular | Embedded byte array from the same clay-widgets revision | `fonts/embedded-font.h`, `fonts/LICENSE.txt` | Apache 2.0 (Google) |
+| [clay-widgets](https://github.com/AlessandroAU/clay-widgets) | Git submodule at `clay-widgets/` | `335a3e02a8719fd2fee1ecf50bcfbf7a01cf33dc` | MIT |
+| [Clay](https://github.com/nicbarker/clay) | clay-widgets' submodule `subprojects/clay` | pinned by clay-widgets (`e6cc369`) | zlib |
+| [raylib](https://github.com/raysan5/raylib) | clay-widgets' submodule `subprojects/raylib`, bundled GLFW included | pinned by clay-widgets (`fc03d77`) | zlib; bundled licenses retained in source |
+| [FreeType](https://freetype.org) | clay-widgets' submodule `subprojects/freetype` | pinned by clay-widgets (`VER-2-14-3`) | FreeType License (FTL), chosen from its FTL/GPLv2 dual license |
+| [nlohmann/json](https://github.com/nlohmann/json) | Vendored: `nlohmann/json.hpp`, `LICENSE.MIT` | `v3.11.3` | MIT |
+| Roboto Regular | clay-widgets' `assets/generated/embedded-font.h`; the license text is `fonts/LICENSE.txt` | from clay-widgets | Apache 2.0 (Google) |
 
-The Clay revision matches the clay-widgets repository's pinned submodule. Do not independently upgrade Clay without running the widget tests.
+Clone with `git clone --recursive`, or run `git submodule update --init --recursive` in an existing checkout. CMake stops with that hint when the checkout is missing. Once fetched, builds need no network access.
 
-## Local MSVC compatibility changes
-
-The vendored clay-widgets copy is modified. The pre-amalgamation compatibility diff against the revisions above is in `patches/clay-widgets-msvc.patch`:
-
-1. Replace C compound literals such as `(Clay_Color){...}` with `CLAY__INIT(Clay_Color) {...}`. Clay's existing macro expands to standard braced initialization in C++ and a compound literal in C. This also applies to the imported tests.
-2. Include `<cstddef>` and use `std::max_align_t` in C++ for the widget state pool. This makes the public header self-contained on MSVC instead of depending on an earlier standard-library include. The C branch still uses `max_align_t`.
-
-No widget behavior was intentionally changed. Clay itself is unmodified. The implementation requires **C++20** because of designated initializers; the application's existing core remains C++17.
-
-The raylib backend additionally accepts an explicit scale argument for offscreen scissor rectangles. This is included in the same patch. Raylib's `CloseWindow` symbol is renamed at compile time to `UsageTrackerRaylibCloseWindow` for raylib and its adapter only, avoiding a user32 symbol collision without changing Windows declarations or upstream source. Raylib audio/models and the high-resolution multimedia timer are disabled in CMake. Roboto is embedded, so its font file is not loaded from disk at runtime.
+The app builds everything from the clay-widgets checkout: its split headers, its raylib backend, its tests, and the Clay, raylib and FreeType revisions it pins and tests against. So the widget library and its dependencies cannot drift apart, and nothing here is a modified copy.
 
 ## Build integration
 
@@ -32,31 +21,24 @@ The raylib backend additionally accepts an explicit scale argument for offscreen
 target_link_libraries(your_target PRIVATE clay_widgets)
 ```
 
-Then include `<clay.h>` and `<clay-widgets.h>` without defining implementation macros. `src/ui/clay_widgets.cpp` owns both implementations. Third-party warnings are suppressed only for that implementation target and the imported upstream test target; the application's warning-as-error policy remains enabled.
+Then include `<clay.h>` and `<clay-widgets/widgets.h>` without defining implementation macros. `src/ui/clay_widgets.cpp` owns both implementations. Third-party warnings are suppressed only for that implementation target, the upstream test target and FreeType; the application's warning-as-error policy remains enabled. The implementation requires **C++20** because of designated initializers; the application's core remains C++17.
 
-`clay_widgets_tests` runs the upstream headless suite (566 checks). It has its own implementation instance, following upstream's test harness. `clay_link_test` separately verifies that a consumer can link the static library and generate render commands without implementation macros. Both are registered with CTest alongside the existing core tests.
+`clay_widgets_tests` builds and runs clay-widgets' headless suite from the submodule. `clay_link_test` separately verifies that a consumer can link the static library and generate render commands without implementation macros. Both are registered with CTest alongside the application's tests. Upstream's `tests/test-raylib.cpp` is not built here: it needs a GL window.
 
-For an update, replace the included files from pinned upstream revisions, preserve licenses, reapply/review the compatibility diff, and run the full tests on MSVC and Linux GCC. Renderer/font dependencies are separate from the headless widget library; the upstream demo is not included. Raylib/GLFW are built statically with MSVC for the Windows renderer. Their bundled source license notices are preserved.
+Raylib's `CloseWindow` symbol is renamed at compile time to `UsageTrackerRaylibCloseWindow` for raylib and its adapter only, avoiding a user32 symbol collision without changing Windows declarations or upstream source. Raylib audio/models and the high-resolution multimedia timer are disabled in CMake. Roboto is embedded, so its font file is not loaded from disk at runtime.
 
-## Regenerating the single header
+Text is rasterized with FreeType's light (vertical-only) hinting rather than raylib's unhinted stb_truetype, through the backend's `CLAY_WIDGETS_FREETYPE` option. FreeType is compiled as the `freetype` CMake target with the same source list as clay-widgets' Makefile. The backend's `freetype-config/freetype/config/ftmodule.h` precedes FreeType's headers on that target's include path, so only the compiled modules are registered.
 
-The checked-in `clay-widgets/clay-widgets.h` is generated from the patched split
-headers using `tools/amalgamate-clay-widgets.py` (adapted from upstream to accept
-an external source directory). Builds use this header directly and need no Python.
-The backend and headless tests also include the amalgamated header.
+## Updating
 
-To update, obtain the pinned upstream sources in a temporary directory and apply
-`patches/clay-widgets-msvc.patch` from that checkout's root with `git apply`.
-Then run from this project's root:
+Make changes in the clay-widgets repository, run its tests (`make test test-amalgam test-backend`), commit and push. To move raylib or FreeType, update the submodule there first. Then here:
 
 ```sh
-python tools/amalgamate-clay-widgets.py --source /path/to/patched/clay-widgets -o vendor/clay-widgets/clay-widgets.h
+git -C vendor/clay-widgets fetch
+git -C vendor/clay-widgets checkout <commit>
+git submodule update --init --recursive
 ```
 
-Keep the backend and tests in sync with the patched checkout, changing their
-split-header includes to `clay-widgets.h`, and run the full test suite.
-Clay remains a separate dependency with its own license.
+Update the revision above, run `build.bat` (it builds with MSVC and runs every CTest suite), and commit the new submodule pointer.
 
-The local slider `showThumb` option draws a thin track and visible handle while preserving upstream keyboard, focus, and pointer behavior. It defaults off for existing callers.
-
-Text drawing snaps glyph origins to device pixels and uses the atlas pixel size for both glyph advances and drawing, avoiding extra resampling at fractional DPI.
+Portions of this software are copyright © The FreeType Project (https://freetype.org). All rights reserved.

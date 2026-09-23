@@ -10,7 +10,7 @@
 #include <raylib.h>
 #include <rlgl.h>
 #include <backends/raylib/clay-raylib-renderer.h>
-#include <embedded-font.h>
+#include <assets/generated/embedded-font.h>
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
@@ -89,7 +89,7 @@ Pixels Renderer::render(Clay_RenderCommandArray commands, int width, int height,
     BeginBlendMode(BLEND_CUSTOM_SEPARATE);
     rlPushMatrix();
     rlScalef(scale, scale, 1);
-    RenderClayCommands(commands, impl_->fonts, scale);
+    RenderClayCommands(commands, impl_->fonts, true);
     rlPopMatrix();
     EndBlendMode();
     EndTextureMode();

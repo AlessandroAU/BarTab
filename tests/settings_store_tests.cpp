@@ -41,8 +41,10 @@ int main() {
         check(read_settings({}) == Preferences{}, "Empty load path uses defaults");
         check(!write_settings({}, {}), "Empty save path fails");
         Preferences saved;
-        saved.appearance = {230, 120, 270, 73, 350, 5, 37, false, false};
+        saved.appearance = {230, 120, 270, 73, 5, 37, false, false};
         saved.appearance.twelve_hour_time = true;
+        saved.appearance.bold_taskbar = true;
+        saved.appearance.bold_settings = true;
         saved.codex_enabled = false;
         saved.claude_enabled = false;
         saved.codex_interval = 45;
@@ -74,7 +76,7 @@ int main() {
         const auto invalid = temporary.path / L"invalid.ini";
         {
             std::ofstream file(invalid);
-            file << "[Appearance]\nTextPercent=999\nWidgetWidth=1\nFont=99\nHoverOpacity=oops\n"
+            file << "[Appearance]\nTextPercent=999\nWidgetWidth=1\nFont=99\nHoverDelay=900\nHoverOpacity=oops\n"
                     "[Providers]\nCodexInterval=1\nClaudeInterval=9999\n";
         }
         const auto loaded = read_settings(invalid);
@@ -87,6 +89,15 @@ int main() {
               "Malformed numbers produce a valid preference");
         check(loaded.codex_enabled,
               "Missing keys retain defaults");
+        const auto legacy = temporary.path / L"legacy.ini";
+        {
+            std::ofstream file(legacy);
+            file << "[Appearance]\nBoldText=1\nBoldHover=0\n";
+        }
+        const auto migrated = read_settings(legacy).appearance;
+        check(migrated.bold_taskbar && migrated.bold_settings,
+              "The old shared BoldText switch seeds every surface's bold setting");
+        check(!migrated.bold_hover, "A per-surface bold key overrides the old shared switch");
         std::cout << "Settings persistence and failure handling passed\n";
         return 0;
     } catch (const std::exception& error) {

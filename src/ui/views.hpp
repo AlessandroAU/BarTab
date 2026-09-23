@@ -1,7 +1,7 @@
 #pragma once
 #include "core/usage.hpp"
 #include <clay.h>
-#include <clay-widgets.h>
+#include <clay-widgets/widgets.h>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -17,6 +17,13 @@ Rect place_widget(const Appearance& appearance, Rect panel, const std::vector<Re
 Clay_Dimensions hover_size(const Usage& data, int text_percent);
 
 enum class Surface { Widget, Details, Hover, Settings };
+// The settings panel's sidebar pages, in sidebar order.
+enum class SettingsPage : int32_t { Taskbar, Hover, Providers, General };
+// The settings window's size in DIPs; the tallest page, Providers, fits without scrolling.
+inline constexpr int settings_width = 860, settings_height = 600;
+// The host registers the Windows UI font's regular and bold faces under these
+// ids; each surface draws with the one its bold preference picks.
+inline constexpr uint16_t regular_font = 1, bold_font = 2;
 struct Frame {
     Clay_RenderCommandArray commands{};
     bool changed{};
@@ -34,6 +41,8 @@ class View {
     View& operator=(const View&) = delete;
     Frame frame(Usage& data, ClayWidgets_Input input, float width, float height);
     Clay_BoundingBox bounds(const char* id);
+    // Whether keyboard focus is on the element, for hosts driving the view by keys.
+    bool focused(const char* id);
     float hover_height(Usage& data, float width);
     void reset_focus();
     void set_surface(Surface value) {
@@ -59,6 +68,15 @@ class View {
     bool claude_enabled() const {
         return preferences_.claude_enabled;
     }
+    // The taskbar widget, the hover card and the popup (settings and details)
+    // each have their own bold switch.
+    uint16_t font_id() const {
+        const auto& a = preferences_.appearance;
+        const bool bold = surface_ == Surface::Widget  ? a.bold_taskbar
+                          : surface_ == Surface::Hover ? a.bold_hover
+                                                       : a.bold_settings;
+        return bold ? bold_font : regular_font;
+    }
     int text_percent() const {
         return preferences_.appearance.text_percent;
     }
@@ -83,12 +101,14 @@ class View {
         return changed;
     }
     // Glyph coverage is composited in sRGB rather than in linear light, which
-    // leaves light-on-dark text too thin and dark-on-light text too heavy. The
-    // baked atlas compensates with a power curve, so each theme needs the
-    // opposite exponent. It is an approximation: an exact fix needs the
-    // background at blend time, which this backend cannot read.
+    // leaves light-on-dark text too thin; the baked atlas thickens it with a
+    // power curve. Hinted glyphs already have solid stems, so the curve is mild:
+    // 1.6 made bold text blobby. Dark-on-light keeps raw coverage. Linear light
+    // would thin it, but Windows draws its own dark text heavier than that, and
+    // thinning made small grey labels faint. Chosen from 1x sweeps of every
+    // surface (screenshots --sweep).
     float text_gamma() const {
-        return system_light_ ? 1.f / 1.6f : 1.6f;
+        return system_light_ ? 1.f : 1.3f;
     }
     // Eased hover, toggle and scroll motion. Off by default so layouts, tests and
     // screenshots are deterministic; a host that enables it must keep rendering
@@ -98,6 +118,12 @@ class View {
     }
     bool animations() const {
         return widgets_->animationsEnabled;
+    }
+    void set_settings_page(SettingsPage value) {
+        settings_page_ = static_cast<int32_t>(value);
+    }
+    SettingsPage settings_page() const {
+        return static_cast<SettingsPage>(settings_page_);
     }
     void invalidate_measurements();
     ClayWidgets_Cursor cursor() const;
@@ -123,6 +149,7 @@ class View {
     bool hovered_{};
     bool system_light_{};
     bool connection_open_[2]{};
+    int32_t settings_page_{};
     Color system_accent_{0, 120, 212};
     bool light_theme() const;
     // The hover card scales with its own preference; the taskbar uses the general one.
@@ -143,6 +170,13 @@ class View {
     void settings_panel(const Usage& data, Frame& result, ClayWidgets_Input input);
     bool interval_dropdown(const char* id, int& seconds);
     bool setting_slider(const char* id, const char* title, int& value, SettingRange range, const char* unit);
+    bool setting_toggle(const char* id, const char* title, bool& value);
+    void settings_section(const char* title, bool divider);
+    bool begin_settings_page(const char* title, const char* scroll_id, const char* action = nullptr);
+    void taskbar_settings(Frame& result);
+    void hover_settings(Frame& result);
+    void providers_settings(const Usage& data, Frame& result, std::int64_t now);
+    void general_settings(Frame& result);
     void wrapped_text(const std::string& value, uint16_t size, Clay_Color tint);
     Clay_Color accent_color() const;
     Clay_Color background_color() const;

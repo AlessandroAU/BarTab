@@ -16,14 +16,14 @@ Click the widget, or the tray icon, for settings and full usage detail:
 
 ## Build and run
 
-Requires Visual Studio 2022 (Desktop development with C++), a Windows SDK, and CMake 3.22+. Every dependency and a fallback font are vendored, so builds need no network access. At runtime you need Windows system DLLs and an OpenGL 3.3-capable driver — no .NET and no Visual C++ redistributable, since the MSVC runtime and all libraries are linked statically.
+Requires Visual Studio 2022 (Desktop development with C++), a Windows SDK, and CMake 3.22+. Clone with `git clone --recursive`, or run `git submodule update --init --recursive` in an existing checkout: clay-widgets is a git submodule and brings the Clay, raylib and FreeType revisions it is tested against. Once fetched, builds need no network access. At runtime you need Windows system DLLs and an OpenGL 3.3-capable driver — no .NET and no Visual C++ redistributable, since the MSVC runtime and all libraries are linked statically.
 
 ```powershell
 .\build.bat   # configure, compile, run the tests, install to bin\
 .\run.bat     # start the installed build
 ```
 
-Both scripts stop any running instance first. Windows Release builds optimize for size, enable link-time optimization across the app and static libraries, remove unused code/data, fold identical sections, and omit debug symbols. Debug builds retain their normal debugging settings. LTO can be disabled when configuring with `-DUSAGETRACKER_ENABLE_LTO=OFF`.
+Both scripts stop any running instance first. Windows Release builds optimize for size, enable link-time optimization across the app and static libraries, remove unused code/data, fold identical sections, and omit debug symbols. Debug builds retain their normal debugging settings. LTO can be disabled when configuring with `-DUSAGETRACKER_ENABLE_LTO=OFF`. The taskbar widget, the hover card and the settings window each have a **Bold text** switch, which asks Windows for the UI font family's bold face; a family without a real bold face is left alone rather than smeared.
 
 Equivalent CMake commands:
 
@@ -57,9 +57,8 @@ Settings has two independently scrolling panels — **Appearance** and **Provide
 | Hover card | on / off, 240–600 px wide | on, 360 px |
 | Hover text size | 100–300% | 150% (copies Taskbar text size from older settings files) |
 | Hover opacity | 50–100% | 95% |
-| Hover delay | 50–1500 ms | 250 ms |
 
-Colors and the UI font follow Windows automatically. The application uses Windows app light/dark mode and accent color; the taskbar follows the separate Windows system mode. The font comes from the Windows UI message-font configuration and updates when Windows broadcasts a settings change. Provider colors stay distinct. Older saved Font, Theme, Accent, and HoverWidth keys are ignored. Text size remains adjustable.
+Colors and the UI font follow Windows automatically. The application uses Windows app light/dark mode and accent color; the taskbar follows the separate Windows system mode. The font comes from the Windows UI message-font configuration and updates when Windows broadcasts a settings change. Provider colors stay distinct. Older saved Font, Theme, Accent, HoverWidth, and HoverDelay keys are ignored. Text size remains adjustable.
 
 Dimensions are logical pixels, before DPI scaling. Widget width is the widget's real width: text size never changes it, and the bars take whatever room the labels leave, so very large text in a narrow widget squeezes the bars away rather than shrinking the text. Compact spacing lets two rows stay stacked up to 180%; larger text uses side-by-side rows to fit the taskbar height. When a free taskbar gap is narrower than the widget, it narrows down to the 100 px minimum, tightening padding and gaps as it shrinks so the bars keep as much length as possible, and hides only when even that does not fit; the full width returns when space becomes available. The hover card keeps its own text size regardless. **Reset appearance to defaults** leaves provider settings alone.
 

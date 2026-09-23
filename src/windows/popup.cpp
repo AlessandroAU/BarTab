@@ -35,6 +35,14 @@ LRESULT CALLBACK App::popup_proc(HWND window, UINT message, WPARAM w, LPARAM l) 
                 return HTCAPTION;
             return HTCLIENT;
         }
+        case WM_SETCURSOR:
+            // Windows asks before every mouse move; answering with the class arrow
+            // would flicker against the hand the next frame sets.
+            if (LOWORD(l) == HTCLIENT) {
+                app->set_details_cursor();
+                return TRUE;
+            }
+            break;
         case WM_MOUSEWHEEL:
         case WM_MOUSEMOVE:
         case WM_MOUSELEAVE:
@@ -157,16 +165,20 @@ void App::render_details_frame(ClayWidgets_Input input) {
     }
     details_pixels_ = renderer_.render(frame.commands, rect.right, rect.bottom, scale, false);
     ++details_frames_;
+    set_details_cursor();
+    InvalidateRect(popup_, nullptr, FALSE);
+}
+
+void App::set_details_cursor() const {
     SetCursor(
         LoadCursorW(nullptr, details_view_.cursor() == CLAY_WIDGETS_CURSOR_POINTER ? IDC_HAND : IDC_ARROW));
-    InvalidateRect(popup_, nullptr, FALSE);
 }
 
 void App::paint_details(HWND window) {
     paint_pixels(window, details_pixels_);
 }
 
-void App::paint_pixels(HWND window, const ui::Pixels& pixels) {
+void App::paint_pixels(HWND window, const ui::Pixels& pixels, int y) {
     PAINTSTRUCT paint{};
     HDC dc = BeginPaint(window, &paint);
     if (!pixels.data.empty()) {
@@ -176,7 +188,7 @@ void App::paint_pixels(HWND window, const ui::Pixels& pixels) {
         info.bmiHeader.biHeight = -pixels.height;
         info.bmiHeader.biPlanes = 1;
         info.bmiHeader.biBitCount = 32;
-        SetDIBitsToDevice(dc, 0, 0, pixels.width, pixels.height, 0, 0, 0, static_cast<UINT>(pixels.height),
+        SetDIBitsToDevice(dc, 0, y, pixels.width, pixels.height, 0, 0, 0, static_cast<UINT>(pixels.height),
                           pixels.data.data(), &info, DIB_RGB_COLORS);
     }
     EndPaint(window, &paint);
@@ -293,8 +305,8 @@ void App::open_details(bool settings) {
     UINT dpi = widget_ ? GetDpiForWindow(widget_) : GetDpiForWindow(controller_);
     if (!dpi)
         dpi = 96;
-    RECT size{0, 0, MulDiv(usage_.live ? 1120 : 400, static_cast<int>(dpi), 96),
-              MulDiv(usage_.live ? 700 : 470, static_cast<int>(dpi), 96)};
+    RECT size{0, 0, MulDiv(usage_.live ? ui::settings_width : 400, static_cast<int>(dpi), 96),
+              MulDiv(usage_.live ? ui::settings_height : 470, static_cast<int>(dpi), 96)};
     POINT cursor{};
     GetCursorPos(&cursor);
     const Rect anchor = widget_bounds_.empty() ? Rect{cursor.x, cursor.y, 1, 1} : widget_bounds_;

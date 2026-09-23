@@ -33,15 +33,29 @@ App::App(bool smoke, bool live_test)
     log(L"Started native prototype; PID " + std::to_wstring(GetCurrentProcessId()));
 }
 
-void App::update_system_font() {
-    if (!renderer_.load_font_data(1, windows_ui_font()))
-        return;
+// Loads the Windows UI font's regular and bold faces side by side, so each
+// surface picks its weight by font id without reloading anything. Drops every
+// cached measurement when either face changed, then refreshes the surfaces that
+// lay themselves out on their own Clay context. The details popup is left to
+// the caller: re-entering its render from inside its own frame would nest
+// layouts on one context.
+bool App::reload_ui_font() {
+    const bool regular = renderer_.load_font_data(ui::regular_font, windows_ui_font(false));
+    const bool bold = renderer_.load_font_data(ui::bold_font, windows_ui_font(true));
+    if (!regular && !bold)
+        return false;
     widget_view_.invalidate_measurements();
     hover_view_.invalidate_measurements();
     details_view_.invalidate_measurements();
-    if (IsWindowVisible(popup_)) render_details(details_pointer_);
-    if (IsWindowVisible(hover_)) show_hover();
     if (widget_) InvalidateRect(widget_, nullptr, FALSE);
+    if (IsWindowVisible(hover_)) show_hover();
+    return true;
+}
+
+void App::update_system_font() {
+    if (!reload_ui_font())
+        return;
+    if (IsWindowVisible(popup_)) render_details(details_pointer_);
 }
 
 // Smoke tests drive the popup synchronously and read layout back, so they keep

@@ -2,10 +2,17 @@
 #include "windows/platform.hpp"
 #include "windows/window_shape.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 
 namespace usage::windows {
+namespace {
+constexpr UINT hover_open_timer = 3;
+constexpr auto hover_open_duration = std::chrono::milliseconds(200);
+// The card starts this fraction of its height tall and grows to full.
+constexpr float hover_open_start = 0.0f;
+} // namespace
 
 LRESULT CALLBACK App::widget_proc(HWND window, UINT message, WPARAM w, LPARAM l) {
     auto* app = instance(window, message, l);
@@ -29,13 +36,11 @@ LRESULT CALLBACK App::widget_proc(HWND window, UINT message, WPARAM w, LPARAM l)
                 app->hovered_ = true;
                 app->widget_view_.set_hovered(true);
                 InvalidateRect(window, nullptr, FALSE);
-                TRACKMOUSEEVENT tracking{sizeof(tracking), TME_HOVER | TME_LEAVE, window,
-                                         static_cast<DWORD>(app->preferences_.appearance.hover_delay)};
+                TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, window, 0};
                 TrackMouseEvent(&tracking);
+                // No delay: the card's opening animation already eases it in.
+                app->show_hover();
             }
-            return 0;
-        case WM_MOUSEHOVER:
-            app->show_hover();
             return 0;
         case WM_MOUSELEAVE:
             if (app->hover_ && IsWindowVisible(app->hover_))
@@ -77,11 +82,11 @@ LRESULT CALLBACK App::hover_proc(HWND window, UINT message, WPARAM w, LPARAM l) 
     auto* app = instance(window, message, l);
     if (app) {
         if (message == WM_PAINT) {
-            paint_pixels(window, app->hover_pixels_);
+            paint_pixels(window, app->hover_pixels_, app->hover_offset_);
             return 0;
         }
         if (message == WM_SIZE) {
-            round_window(window);
+            app->shape_hover();
             return 0;
         }
         if (message == WM_ERASEBKGND)
@@ -113,6 +118,10 @@ LRESULT CALLBACK App::hover_proc(HWND window, UINT message, WPARAM w, LPARAM l) 
             app->show_hover();
             return 0;
         }
+        if (message == WM_TIMER && w == hover_open_timer) {
+            app->animate_hover();
+            return 0;
+        }
     }
     return DefWindowProcW(window, message, w, l);
 }
@@ -131,10 +140,11 @@ void App::hide_hover(bool force) {
     if (hover_) {
         KillTimer(hover_, 1);
         KillTimer(hover_, 2);
+        KillTimer(hover_, hover_open_timer);
         ShowWindow(hover_, SW_HIDE);
     }
     if (widget_ && IsWindow(widget_)) {
-        TRACKMOUSEEVENT tracking{sizeof(tracking), TME_CANCEL | TME_HOVER | TME_LEAVE, widget_, 0};
+        TRACKMOUSEEVENT tracking{sizeof(tracking), TME_CANCEL | TME_LEAVE, widget_, 0};
         TrackMouseEvent(&tracking);
         if (hovered_)
             InvalidateRect(widget_, nullptr, FALSE);
@@ -164,9 +174,7 @@ void App::show_hover() {
         if (!hover_)
             return;
     }
-    SetLayeredWindowAttributes(
-        hover_, 0, static_cast<BYTE>(std::lround(preferences_.appearance.hover_opacity * 255.f / 100.f)),
-        LWA_ALPHA);
+    const bool opening = !IsWindowVisible(hover_);
     const UINT dpi = GetDpiForWindow(widget_);
     const float scale = dpi ? dpi / 96.f : 1.f;
     auto logical = ui::hover_size(usage_, preferences_.appearance.hover_text_percent);
@@ -187,12 +195,52 @@ void App::show_hover() {
     const int y = std::max(static_cast<int>(monitor.rcWork.top),
                            std::min(widget_bounds_.y - height - static_cast<int>(8 * scale),
                                     static_cast<int>(monitor.rcWork.bottom) - height));
+    if (opening) {
+        // Grow away from the taskbar: upward when the card sits above the widget.
+        hover_grows_up_ = y + height / 2 < widget_bounds_.y + widget_bounds_.height / 2;
+        const bool animate = animations_allowed_ && client_animations_enabled();
+        hover_progress_ = animate ? 0.f : 1.f;
+        hover_opened_ = std::chrono::steady_clock::now();
+        if (animate)
+            SetTimer(hover_, hover_open_timer, 16, nullptr);
+    }
     SetWindowPos(hover_, HWND_TOPMOST, x, y, width, height, SWP_NOACTIVATE);
     const auto frame = hover_view_.frame(usage_, {}, logical.width, logical.height);
     hover_pixels_ = renderer_.render(frame.commands, width, height, scale, false);
+    shape_hover();
     InvalidateRect(hover_, nullptr, FALSE);
     ShowWindow(hover_, SW_SHOWNOACTIVATE);
     SetTimer(hover_, 2, 60000, nullptr);
+}
+
+// Clips the card to the part that has grown so far and fades it to match. The
+// pixels are offset so the card's far edge travels with the growing edge.
+void App::shape_hover() {
+    if (!hover_)
+        return;
+    RECT bounds{};
+    GetClientRect(hover_, &bounds);
+    const int height = bounds.bottom;
+    const int visible = std::max(1, static_cast<int>(std::lround(
+        height * (hover_open_start + (1.f - hover_open_start) * hover_progress_))));
+    const int top = hover_grows_up_ ? height - visible : 0;
+    hover_offset_ = hover_grows_up_ ? top : visible - height;
+    round_window(hover_, top, top + visible);
+    SetLayeredWindowAttributes(
+        hover_, 0,
+        static_cast<BYTE>(std::lround(preferences_.appearance.hover_opacity * 255.f / 100.f * hover_progress_)),
+        LWA_ALPHA);
+}
+
+void App::animate_hover() {
+    const float t = std::min(1.f, std::chrono::duration<float>(std::chrono::steady_clock::now() - hover_opened_) /
+                                      std::chrono::duration<float>(hover_open_duration));
+    // Ease out: most of the growth early, settling gently into place.
+    hover_progress_ = 1.f - (1.f - t) * (1.f - t) * (1.f - t);
+    if (t >= 1.f)
+        KillTimer(hover_, hover_open_timer);
+    shape_hover();
+    InvalidateRect(hover_, nullptr, FALSE);
 }
 
 void App::reset_widget() {
@@ -286,13 +334,17 @@ void App::paint_widget(HWND window) {
     RECT bounds{};
     GetClientRect(window, &bounds);
     if (bounds.right > 0 && bounds.bottom > 0) {
-        const float scale = static_cast<float>(bounds.bottom) / widget_height;
+        // Scale by DPI, as the hover card does, not by the height the widget was
+        // rounded to: 38 px rounds to 48 at 125%, and 48 / 38 = 1.263 would
+        // bake different text sizes from the card beside it on the same monitor.
+        const UINT dpi = GetDpiForWindow(window);
+        const float scale = dpi ? dpi / 96.f : static_cast<float>(bounds.bottom) / widget_height;
         renderer_.set_surface(scale, widget_view_.text_gamma());
         if (widget_scale_ != scale) {
             widget_view_.invalidate_measurements();
             widget_scale_ = scale;
         }
-        const auto frame = widget_view_.frame(usage_, {}, bounds.right / scale, widget_height);
+        const auto frame = widget_view_.frame(usage_, {}, bounds.right / scale, bounds.bottom / scale);
         const auto pixels = renderer_.render(frame.commands, bounds.right, bounds.bottom, scale, true);
         HDC dc = GetDC(nullptr);
         HDC buffer = CreateCompatibleDC(dc);

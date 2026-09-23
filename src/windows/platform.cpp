@@ -33,11 +33,20 @@ Color windows_accent() {
                 static_cast<std::uint8_t>(value)};
     return {0, 120, 212};
 }
-std::vector<unsigned char> windows_ui_font() {
+std::vector<unsigned char> windows_ui_font(bool bold) {
     NONCLIENTMETRICSW metrics{};
     metrics.cbSize = sizeof(metrics);
     if (!SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0))
         return {};
+    if (bold) {
+        // Ask the font mapper for another weight in the same family. GetFontData
+        // below returns whatever physical face it lands on, so a family shipping
+        // a real bold (Segoe UI does) yields that face's own outlines. One that
+        // does not falls back to its regular file, because GDI would only
+        // embolden such a family while rasterizing - and nothing here rasterizes
+        // through GDI, so the caller simply sees no change.
+        metrics.lfMessageFont.lfWeight = FW_BOLD;
+    }
     const auto font = CreateFontIndirectW(&metrics.lfMessageFont);
     if (!font) return {};
     const auto dc = CreateCompatibleDC(nullptr);

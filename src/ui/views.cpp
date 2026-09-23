@@ -96,6 +96,24 @@ std::string format_reset_time(std::int64_t timestamp, bool date_only, bool day_k
     return buffer;
 }
 
+// One line per setting: the label, the control, and for sliders the value, so a
+// page's rows share their columns and read as a table.
+constexpr float settings_label_width = 150;
+constexpr float settings_value_width = 100;
+Clay_ElementDeclaration setting_row() {
+    auto row = column(0, 16);
+    row.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    row.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
+    row.layout.sizing.height = CLAY_SIZING_FIT(32);
+    return row;
+}
+Clay_ElementDeclaration fixed_cell(float width, Clay_LayoutAlignmentX align = CLAY_ALIGN_X_LEFT) {
+    Clay_ElementDeclaration cell{};
+    cell.layout.sizing.width = CLAY_SIZING_FIXED(width);
+    cell.layout.childAlignment.x = align;
+    cell.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
+    return cell;
+}
 } // namespace
 std::string View::date(std::int64_t timestamp) const {
     return format_date(timestamp, preferences_.appearance.twelve_hour_time);
@@ -136,30 +154,144 @@ Clay_Color View::provider_color(const char* name, bool secondary) const {
 void View::wrapped_text(const std::string& value, uint16_t size, Clay_Color tint) {
     Clay_TextElementConfig config{};
     config.fontSize = size;
-    config.fontId = 1;    config.textColor = text_color(tint);
+    config.fontId = font_id();    config.textColor = text_color(tint);
     config.wrapMode = CLAY_TEXT_WRAP_WORDS;
     CLAY_TEXT(string(label(value)), config);
 }
 bool View::setting_slider(const char* name, const char* title, int& value, SettingRange range,
                           const char* unit) {
-    auto heading = column(0, 4);
-    heading.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
-    CLAY_AUTO_ID (heading) {
-        text(title, settings_body, {210, 220, 234, 255});
-        auto spacer = column(0, 0);
-        CLAY_AUTO_ID (spacer) {}
-        text(label(std::to_string(value) + unit), settings_help, {157, 174, 193, 255});
+    bool changed = false;
+    CLAY_AUTO_ID (setting_row()) {
+        CLAY_AUTO_ID (fixed_cell(settings_label_width)) {
+            text(title, settings_body, {236, 243, 250, 255});
+        }
+        float current = static_cast<float>(value);
+        ClayWidgets_SliderOptions options{};
+        options.minValue = static_cast<float>(range.min);
+        options.maxValue = static_cast<float>(range.max);
+        options.step = static_cast<float>(range.step);
+        options.showThumb = true;
+        if (ClayWidgets_Slider(widgets_.get(), id(name), &current, options)) {
+            value = static_cast<int>(std::lround(current));
+            changed = true;
+        }
+        CLAY_AUTO_ID (fixed_cell(settings_value_width, CLAY_ALIGN_X_RIGHT)) {
+            text(label(std::to_string(value) + unit), settings_help, {157, 174, 193, 255});
+        }
     }
-    float current = static_cast<float>(value);
-    ClayWidgets_SliderOptions options{};
-    options.minValue = static_cast<float>(range.min);
-    options.maxValue = static_cast<float>(range.max);
-    options.step = static_cast<float>(range.step);
-    options.showThumb = true;
-    if (!ClayWidgets_Slider(widgets_.get(), id(name), &current, options))
-        return false;
-    value = static_cast<int>(std::lround(current));
-    return true;
+    return changed;
+}
+bool View::setting_toggle(const char* name, const char* title, bool& value) {
+    bool changed = false;
+    CLAY_AUTO_ID (setting_row()) {
+        text(title, settings_body, {236, 243, 250, 255});
+        Clay_ElementDeclaration spacer{};
+        spacer.layout.sizing.width = CLAY_SIZING_GROW(0);
+        CLAY_AUTO_ID (spacer) {}
+        changed = ClayWidgets_Toggle(widgets_.get(), id(name), CLAY_STRING(""), &value);
+    }
+    return changed;
+}
+void View::settings_section(const char* title, bool divider) {
+    if (divider) {
+        auto line = column(0, 0);
+        line.layout.sizing.height = CLAY_SIZING_FIXED(1);
+        line.backgroundColor = widgets_->theme.borderColor;
+        CLAY_AUTO_ID (line) {}
+    }
+    // Always the bold face, so sections stand apart from their rows whichever
+    // weight the rows use.
+    Clay_TextElementConfig config{};
+    config.fontId = bold_font;
+    config.fontSize = settings_body;
+    config.textColor = text_color({236, 243, 250, 255});
+    CLAY_TEXT(string(title), config);
+}
+// A page is its title row, then its controls in one scrolling surface; `action`
+// is an optional button for the title row's right edge.
+bool View::begin_settings_page(const char* title, const char* scroll_id, const char* action) {
+    bool pressed = false;
+    auto heading = column(0, 8);
+    heading.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    heading.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
+    heading.layout.sizing.height = CLAY_SIZING_FIXED(44);
+    CLAY_AUTO_ID (heading) {
+        text(title, 21, {236, 243, 250, 255});
+        if (action) {
+            Clay_ElementDeclaration spacer{};
+            spacer.layout.sizing.width = CLAY_SIZING_GROW(0);
+            CLAY_AUTO_ID (spacer) {}
+            pressed = ClayWidgets_Button(widgets_.get(), id("RefreshUsage"), string(action));
+        }
+    }
+    ClayWidgets_ScrollPanelOptions scroll{};
+    scroll.width = CLAY_SIZING_GROW(0);
+    scroll.height = CLAY_SIZING_GROW(0);
+    scroll.padding = 16;
+    scroll.childGap = 12;
+    scroll.fadeMargin = 8;
+    ClayWidgets_BeginScrollPanel(widgets_.get(), id(scroll_id), scroll);
+    return pressed;
+}
+void View::taskbar_settings(Frame& result) {
+    auto& a = preferences_.appearance;
+    begin_settings_page("Taskbar", "TaskbarScroll");
+    settings_section("Text", false);
+    result.changed = setting_slider("TextSizeSlider", "Text size", a.text_percent,
+                                    preference_limits::text_percent, "%") || result.changed;
+    result.changed = setting_toggle("BoldTaskbar", "Bold text", a.bold_taskbar) || result.changed;
+    result.changed = setting_toggle("ShowResets", "Show reset dates", a.show_resets) || result.changed;
+    settings_section("Size and position", true);
+    result.changed = setting_slider("WidgetWidth", "Widget width", a.widget_width,
+                                    preference_limits::widget_width, " px") || result.changed;
+    result.changed = setting_slider("WidgetPosition", "Position", a.position, preference_limits::position,
+                                    "% from left") || result.changed;
+    result.changed = setting_slider("BarHeight", "Bar thickness", a.bar_height, preference_limits::bar_height,
+                                    " px") || result.changed;
+    ClayWidgets_EndScrollPanel(widgets_.get(), CLAY_ID("TaskbarScroll"));
+}
+void View::hover_settings(Frame& result) {
+    auto& a = preferences_.appearance;
+    begin_settings_page("Hover card", "HoverScroll");
+    result.changed = setting_toggle("HoverEnabled", "Show hover card", a.hover_enabled) || result.changed;
+    settings_section("Appearance", true);
+    result.changed = setting_slider("HoverTextSizeSlider", "Text size", a.hover_text_percent,
+                                    preference_limits::text_percent, "%") || result.changed;
+    result.changed = setting_toggle("BoldHover", "Bold text", a.bold_hover) || result.changed;
+    result.changed = setting_slider("HoverOpacity", "Opacity", a.hover_opacity,
+                                    preference_limits::hover_opacity, "%") || result.changed;
+    wrapped_text("While settings are open the hover card stays pinned beside the taskbar, so these "
+                 "changes preview live.",
+                 settings_help, {166, 187, 208, 255});
+    ClayWidgets_EndScrollPanel(widgets_.get(), CLAY_ID("HoverScroll"));
+}
+void View::general_settings(Frame& result) {
+    auto& a = preferences_.appearance;
+    begin_settings_page("General", "GeneralScroll");
+    settings_section("Settings window", false);
+    result.changed = setting_toggle("BoldSettings", "Bold text", a.bold_settings) || result.changed;
+    settings_section("Time", true);
+    CLAY_AUTO_ID (setting_row()) {
+        CLAY_AUTO_ID (fixed_cell(settings_label_width)) {
+            text("Time format", settings_body, {236, 243, 250, 255});
+        }
+        Clay_ElementDeclaration spacer{};
+        spacer.layout.sizing.width = CLAY_SIZING_GROW(0);
+        CLAY_AUTO_ID (spacer) {}
+        CLAY_AUTO_ID (fixed_cell(200)) {
+            Clay_String time_formats[] = {CLAY_STRING("24-hour"), CLAY_STRING("12-hour (AM/PM)")};
+            int32_t time_format = a.twelve_hour_time ? 1 : 0;
+            if (ClayWidgets_Combo(widgets_.get(), CLAY_ID("TimeFormat"), CLAY_STRING(""), time_formats, 2,
+                                  &time_format)) {
+                a.twelve_hour_time = time_format == 1;
+                result.changed = true;
+            }
+        }
+    }
+    wrapped_text("Reset times on the taskbar, the hover card and here use this format. Colors, accent "
+                 "and font family follow Windows settings.",
+                 settings_help, {166, 187, 208, 255});
+    ClayWidgets_EndScrollPanel(widgets_.get(), CLAY_ID("GeneralScroll"));
 }
 bool View::interval_dropdown(const char* name, int& seconds) {
     std::vector<int> values{15, 30, 60, 120, 300, 600, 900};
@@ -177,13 +309,105 @@ bool View::interval_dropdown(const char* name, int& seconds) {
     }
     int32_t selected =
         static_cast<int32_t>(std::find(values.begin(), values.end(), seconds) - values.begin());
-    text("Update interval", settings_body, {210, 220, 234, 255});
-    if (!ClayWidgets_Combo(widgets_.get(), id(name), CLAY_STRING(""), items.data(),
-                           static_cast<int32_t>(items.size()), &selected))
-        return false;
-    seconds = values[static_cast<std::size_t>(selected)];
-    return true;
+    bool changed = false;
+    CLAY_AUTO_ID (setting_row()) {
+        text("Update every", settings_body, {210, 220, 234, 255});
+        changed = ClayWidgets_Combo(widgets_.get(), id(name), CLAY_STRING(""), items.data(),
+                                    static_cast<int32_t>(items.size()), &selected);
+    }
+    if (changed)
+        seconds = values[static_cast<std::size_t>(selected)];
+    return changed;
 }
+void View::providers_settings(const Usage& data, Frame& result, std::int64_t now) {
+    result.refresh = begin_settings_page("Providers", "ProvidersScroll", "Refresh") || result.refresh;
+    auto cards = column(0, 14);
+    cards.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    CLAY (CLAY_ID("ProviderCards"), cards) {
+        for (int index = 0; index < 2; ++index) {
+            const bool is_codex = index == 0;
+            const auto& account = is_codex ? data.codex : data.claude;
+            auto card = column(12, 10);
+            card.backgroundColor = background_color();
+            card.cornerRadius = CLAY_CORNER_RADIUS(10);
+            CLAY (id(is_codex ? "LiveUsageCodex" : "LiveUsageClaude"), card) {
+                auto& enabled = is_codex ? preferences_.codex_enabled : preferences_.claude_enabled;
+                auto header = column(0, 6);
+                header.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+                header.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
+                CLAY_AUTO_ID (header) {
+                    text(is_codex ? "Codex usage" : "Claude usage", 19,
+                         provider_color(is_codex ? "Codex" : "Claude"));
+                    auto spacer = column(0, 0);
+                    CLAY_AUTO_ID (spacer) {}
+                    result.changed = ClayWidgets_Toggle(widgets_.get(),
+                        id(is_codex ? "EnableCodex" : "EnableClaude"), CLAY_STRING(""), &enabled) || result.changed;
+                }
+                wrapped_text("Plan: " + (account.plan.empty() ? std::string("Not reported") : account.plan),
+                             settings_body, {157, 174, 193, 255});
+                text(label(std::string(!account.installed ? "Not detected" : !enabled ? "Disabled" :
+                                       !account.error.empty() ? "Refresh failed" : "Connected") +
+                           " \xC2\xB7 " + freshness(account.updated, now)),
+                     settings_help, {157, 174, 193, 255});
+                auto& interval =
+                    is_codex ? preferences_.codex_interval : preferences_.claude_interval;
+                result.changed =
+                    interval_dropdown(is_codex ? "CodexInterval" : "ClaudeInterval", interval) ||
+                    result.changed;
+                if (!account.error.empty())
+                    wrapped_text("Last error: " + account.error, settings_body,
+                                 {240, 180, 90, 255});
+                if (!enabled && !account.windows.empty())
+                    wrapped_text("Retained reading; updates paused.", settings_body,
+                                 {240, 180, 90, 255});
+                if (account.windows.empty())
+                    wrapped_text(account.installed
+                                     ? "No usage reading yet."
+                                     : "Install and sign in, then refresh detection.",
+                                 settings_body, {166, 187, 208, 255});
+                for (std::size_t i = 0; i < account.windows.size(); ++i) {
+                    const auto& window = account.windows[i];
+                    allowance_row(label(std::string(is_codex ? "SettingsCodex" : "SettingsClaude") +
+                                        std::to_string(i)),
+                                  is_codex ? "Codex" : "Claude", window, now);
+                }
+                auto divider = column(0, 0);
+                divider.layout.sizing.height = CLAY_SIZING_FIXED(1);
+                divider.backgroundColor = widgets_->theme.borderColor;
+                CLAY_AUTO_ID (divider) {
+                }
+                const auto connection_id = id(is_codex ? "CodexConnection" : "ClaudeConnection");
+                if (ClayWidgets_BeginCollapsible(widgets_.get(), connection_id,
+                                                 CLAY_STRING("Connection details"), &connection_open_[index])) {
+                    wrapped_text(account.updated
+                                     ? "Last update: " + date(account.updated) + " (local)"
+                                     : "Last update: Never",
+                                 settings_body, {166, 187, 208, 255});
+                    text("Executable", settings_body, {166, 187, 208, 255});
+                    if (account.executable_path.empty())
+                        text("Not found", settings_body, {166, 187, 208, 255});
+                    else {
+                        // Preserve every character while wrapping long executable paths.
+                        for (std::size_t offset = 0; offset < account.executable_path.size();) {
+                            auto end = std::min(offset + 23, account.executable_path.size());
+                            while (end < account.executable_path.size() &&
+                                   (static_cast<unsigned char>(account.executable_path[end]) &
+                                    0xc0) == 0x80)
+                                ++end;
+                            text(label(account.executable_path.substr(offset, end - offset)),
+                                 settings_body, {166, 187, 208, 255});
+                            offset = end;
+                        }
+                    }
+                    ClayWidgets_EndCollapsible(widgets_.get(), connection_id);
+                }
+            }
+        }
+    }
+    ClayWidgets_EndScrollPanel(widgets_.get(), CLAY_ID("ProvidersScroll"));
+}
+// A sidebar of pages beside the selected page, then the footer. Appearance edits
+// preview live on the taskbar and the pinned hover card; Save or Cancel ends them.
 void View::settings_panel(const Usage& data, Frame& result, ClayWidgets_Input input) {
     const auto now = reference_time_ ? reference_time_ : static_cast<std::int64_t>(std::time(nullptr));
     auto root = column(16, 14);
@@ -197,185 +421,55 @@ void View::settings_panel(const Usage& data, Frame& result, ClayWidgets_Input in
             text("Settings", 24, {236, 243, 250, 255});
             text("Changes preview live. Cancel restores saved settings.", settings_help, {166, 187, 208, 255});
         }
-        auto panels = column(0, 16);
-        panels.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
-        panels.layout.sizing.height = CLAY_SIZING_GROW(0);
-        CLAY (CLAY_ID("ConfigurationPanels"), panels) {
-            auto appearance = column(0, 10);
-            appearance.layout.sizing.width = CLAY_SIZING_FIXED(330);
-            appearance.layout.sizing.height = CLAY_SIZING_GROW(0);
-            CLAY (CLAY_ID("AppearancePanel"), appearance) {
-                auto appearance_heading = column(0, 0);
-                appearance_heading.layout.sizing.height = CLAY_SIZING_FIXED(40);
-                appearance_heading.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
-                CLAY_AUTO_ID (appearance_heading) {
-                    text("Appearance", 21, {236, 243, 250, 255});
-                }
-                ClayWidgets_ScrollPanelOptions scroll{};
-                scroll.width = CLAY_SIZING_GROW(0);
-                scroll.height = CLAY_SIZING_GROW(0);
-                scroll.padding = 12;
-                scroll.childGap = 10;
-                scroll.fadeMargin = 8;
-                ClayWidgets_BeginScrollPanel(widgets_.get(), CLAY_ID("AppearanceScroll"), scroll);
-                auto& a = preferences_.appearance;
-                text("Taskbar", 19, {236, 243, 250, 255});
-                result.changed = setting_slider("TextSizeSlider", "Text size", a.text_percent,
-                                                preference_limits::text_percent, "%") ||
-                                 result.changed;
-                result.changed = setting_slider("WidgetWidth", "Widget width", a.widget_width,
-                                                preference_limits::widget_width, " px") ||
-                                 result.changed;
-                result.changed = setting_slider("WidgetPosition", "Taskbar position", a.position,
-                                                preference_limits::position, "% from left") ||
-                                 result.changed;
-                result.changed = setting_slider("BarHeight", "Bar thickness", a.bar_height,
-                                                preference_limits::bar_height, " px") ||
-                                 result.changed;
-                result.changed =
-                    ClayWidgets_Checkbox(widgets_.get(), CLAY_ID("ShowResets"),
-                                         CLAY_STRING("Show taskbar reset labels"), &a.show_resets) ||
-                    result.changed;
-                text("Time format", settings_body, {210, 220, 234, 255});
-                Clay_String time_formats[] = {CLAY_STRING("24-hour"), CLAY_STRING("12-hour (AM/PM)")};
-                int32_t time_format = a.twelve_hour_time ? 1 : 0;
-                if (ClayWidgets_Combo(widgets_.get(), CLAY_ID("TimeFormat"), CLAY_STRING(""),
-                                      time_formats, 2, &time_format)) {
-                    a.twelve_hour_time = time_format == 1;
-                    result.changed = true;
-                }
-                text("Hover card", 19, {236, 243, 250, 255});
-                result.changed = ClayWidgets_Checkbox(widgets_.get(), CLAY_ID("HoverEnabled"),
-                                                      CLAY_STRING("Show hover card"), &a.hover_enabled) ||
-                                 result.changed;
-                result.changed = setting_slider("HoverTextSizeSlider", "Text size", a.hover_text_percent,
-                                                preference_limits::text_percent, "%") ||
-                                 result.changed;
-                result.changed = setting_slider("HoverOpacity", "Hover opacity", a.hover_opacity,
-                                                preference_limits::hover_opacity, "%") ||
-                                 result.changed;
-                result.changed = setting_slider("HoverDelay", "Hover delay", a.hover_delay,
-                                                preference_limits::hover_delay, " ms") ||
-                                 result.changed;
-                wrapped_text("The hover card stays open beside the taskbar while settings are open so "
-                             "changes preview live. Colors and font follow Windows settings.",
-                             settings_help, {166, 187, 208, 255});
-                ClayWidgets_EndScrollPanel(widgets_.get(), CLAY_ID("AppearanceScroll"));
-                if (ClayWidgets_Button(widgets_.get(), CLAY_ID("ResetAppearance"), CLAY_STRING("Reset appearance"))) {
-                    preferences_.appearance = Appearance{};
-                    result.changed = true;
-                }
-
+        auto body = column(0, 16);
+        body.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+        body.layout.sizing.height = CLAY_SIZING_GROW(0);
+        CLAY (CLAY_ID("SettingsBody"), body) {
+            auto nav = column(0, 4);
+            nav.layout.sizing.width = CLAY_SIZING_FIXED(150);
+            nav.layout.sizing.height = CLAY_SIZING_GROW(0);
+            nav.layout.padding.top = 44 + 4; // level with the page's first row, below its title
+            CLAY (CLAY_ID("SettingsNav"), nav) {
+                const struct {
+                    const char* id;
+                    const char* title;
+                    SettingsPage page;
+                } pages[] = {{"NavTaskbar", "Taskbar", SettingsPage::Taskbar},
+                             {"NavHover", "Hover card", SettingsPage::Hover},
+                             {"NavProviders", "Providers", SettingsPage::Providers},
+                             {"NavGeneral", "General", SettingsPage::General}};
+                for (const auto& entry : pages)
+                    ClayWidgets_TabEx(widgets_.get(), id(entry.id), string(entry.title),
+                                      static_cast<int32_t>(entry.page), &settings_page_,
+                                      CLAY_WIDGETS_TAB_STYLE_SIDEBAR);
             }
-            auto providers = column(0, 10);
-            providers.layout.sizing.height = CLAY_SIZING_GROW(0);
-            CLAY (CLAY_ID("ProvidersPanel"), providers) {
-                auto usage_heading = column(0, 8);
-                usage_heading.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
-                usage_heading.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
-                CLAY_AUTO_ID (usage_heading) {
-                    text("Providers", 21, {236, 243, 250, 255});
-                    auto spacer = column(0, 0);
-                    CLAY_AUTO_ID (spacer) {}
-                    result.refresh = ClayWidgets_Button(widgets_.get(), CLAY_ID("RefreshUsage"), CLAY_STRING("Refresh"));
+            auto page = column(0, 10);
+            page.layout.sizing.height = CLAY_SIZING_GROW(0);
+            CLAY (CLAY_ID("SettingsPage"), page) {
+                switch (static_cast<SettingsPage>(settings_page_)) {
+                case SettingsPage::Taskbar:
+                    taskbar_settings(result);
+                    break;
+                case SettingsPage::Hover:
+                    hover_settings(result);
+                    break;
+                case SettingsPage::Providers:
+                    providers_settings(data, result, now);
+                    break;
+                case SettingsPage::General:
+                    general_settings(result);
+                    break;
                 }
-                ClayWidgets_ScrollPanelOptions scroll{};
-                scroll.width = CLAY_SIZING_GROW(0);
-                scroll.height = CLAY_SIZING_GROW(0);
-                scroll.padding = 12;
-                scroll.childGap = 12;
-                scroll.fadeMargin = 8;
-                ClayWidgets_BeginScrollPanel(widgets_.get(), CLAY_ID("ProvidersScroll"), scroll);
-                auto cards = column(0, 14);
-                cards.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
-                CLAY (CLAY_ID("ProviderCards"), cards) {
-                    for (int index = 0; index < 2; ++index) {
-                        const bool is_codex = index == 0;
-                        const auto& account = is_codex ? data.codex : data.claude;
-                        auto card = column(12, 10);
-                        card.backgroundColor = background_color();
-                        card.cornerRadius = CLAY_CORNER_RADIUS(10);
-                        CLAY (id(is_codex ? "LiveUsageCodex" : "LiveUsageClaude"), card) {
-                            auto& enabled = is_codex ? preferences_.codex_enabled : preferences_.claude_enabled;
-                            auto header = column(0, 6);
-                            header.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
-                            header.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
-                            CLAY_AUTO_ID (header) {
-                                text(is_codex ? "Codex usage" : "Claude usage", 19,
-                                     provider_color(is_codex ? "Codex" : "Claude"));
-                                auto spacer = column(0, 0);
-                                CLAY_AUTO_ID (spacer) {}
-                                result.changed = ClayWidgets_Toggle(widgets_.get(),
-                                    id(is_codex ? "EnableCodex" : "EnableClaude"), CLAY_STRING(""), &enabled) || result.changed;
-                            }
-                            text(label(freshness(account.updated, now)), settings_help, {157, 174, 193, 255});
-                            wrapped_text("Plan: " + (account.plan.empty() ? std::string("Not reported") : account.plan),
-                                         settings_body, {157, 174, 193, 255});
-                            text(!account.installed ? "Not detected" : !enabled ? "Disabled" :
-                                 !account.error.empty() ? "Refresh failed" : "Connected",
-                                 settings_help, {157, 174, 193, 255});
-                            auto& interval =
-                                is_codex ? preferences_.codex_interval : preferences_.claude_interval;
-                            result.changed =
-                                interval_dropdown(is_codex ? "CodexInterval" : "ClaudeInterval", interval) ||
-                                result.changed;
-                            if (!account.error.empty())
-                                wrapped_text("Last error: " + account.error, settings_body,
-                                             {240, 180, 90, 255});
-                            if (!enabled && !account.windows.empty())
-                                wrapped_text("Retained reading; updates paused.", settings_body,
-                                             {240, 180, 90, 255});
-                            if (account.windows.empty())
-                                wrapped_text(account.installed
-                                                 ? "No usage reading yet."
-                                                 : "Install and sign in, then refresh detection.",
-                                             settings_body, {166, 187, 208, 255});
-                            for (std::size_t i = 0; i < account.windows.size(); ++i) {
-                                const auto& window = account.windows[i];
-                                allowance_row(label(std::string(is_codex ? "SettingsCodex" : "SettingsClaude") +
-                                                    std::to_string(i)),
-                                              is_codex ? "Codex" : "Claude", window, now);
-                            }
-                            auto divider = column(0, 0);
-                            divider.layout.sizing.height = CLAY_SIZING_FIXED(1);
-                            divider.backgroundColor = widgets_->theme.borderColor;
-                            CLAY_AUTO_ID (divider) {
-                            }
-                            const auto connection_id = id(is_codex ? "CodexConnection" : "ClaudeConnection");
-                            if (ClayWidgets_BeginCollapsible(widgets_.get(), connection_id,
-                                                             CLAY_STRING("Connection details"), &connection_open_[index])) {
-                                wrapped_text(account.updated
-                                                 ? "Last update: " + date(account.updated) + " (local)"
-                                                 : "Last update: Never",
-                                             settings_body, {166, 187, 208, 255});
-                                text("Executable", settings_body, {166, 187, 208, 255});
-                                if (account.executable_path.empty())
-                                    text("Not found", settings_body, {166, 187, 208, 255});
-                                else {
-                                    // Preserve every character while wrapping long executable paths.
-                                    for (std::size_t offset = 0; offset < account.executable_path.size();) {
-                                        auto end = std::min(offset + 23, account.executable_path.size());
-                                        while (end < account.executable_path.size() &&
-                                               (static_cast<unsigned char>(account.executable_path[end]) &
-                                                0xc0) == 0x80)
-                                            ++end;
-                                        text(label(account.executable_path.substr(offset, end - offset)),
-                                             settings_body, {166, 187, 208, 255});
-                                        offset = end;
-                                    }
-                                }
-                                ClayWidgets_EndCollapsible(widgets_.get(), connection_id);
-                            }
-                        }
-                    }
-                }
-                ClayWidgets_EndScrollPanel(widgets_.get(), CLAY_ID("ProvidersScroll"));
             }
         }
         auto actions = column(0, 12);
         actions.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
         actions.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
         CLAY (CLAY_ID("SettingsActions"), actions) {
+            if (ClayWidgets_Button(widgets_.get(), CLAY_ID("ResetAppearance"), CLAY_STRING("Reset appearance"))) {
+                preferences_.appearance = Appearance{};
+                result.changed = true;
+            }
             Clay_ElementDeclaration spacer{};
             spacer.layout.sizing.width = CLAY_SIZING_GROW(0);
             CLAY_AUTO_ID (spacer) {
@@ -402,7 +496,7 @@ void View::text(const char* value, uint16_t size, Clay_Color tint, int text_perc
     Clay_TextElementConfig config{};
     config.fontSize = static_cast<uint16_t>(std::lround(
         size * (surface_ == Surface::Widget || surface_ == Surface::Hover ? text_percent / 100.f : 1.f)));
-    config.fontId = 1;
+    config.fontId = font_id();
     config.textColor = text_color(tint);
     config.wrapMode = surface_ == Surface::Hover ? CLAY_TEXT_WRAP_WORDS : CLAY_TEXT_WRAP_NONE;
     CLAY_TEXT(string(value), config);
@@ -450,6 +544,10 @@ Clay_BoundingBox View::bounds(const char* name) {
     Clay_SetCurrentContext(clay_);
     return Clay_GetElementData(id(name)).boundingBox;
 }
+bool View::focused(const char* name) {
+    Clay_SetCurrentContext(clay_);
+    return widgets_->focusedId == id(name).id;
+}
 uint16_t View::widget_gap(int normal, int minimum) const {
     return static_cast<uint16_t>(surface_ == Surface::Widget
         ? std::lround(minimum + (normal - minimum) * widget_spacing_ / 100.f) : normal);
@@ -458,7 +556,7 @@ float View::text_width(const char* value, uint16_t size, int text_percent) {
     if (text_percent == 0)
         text_percent = surface_text_percent();
     Clay_TextElementConfig config{};
-    config.fontId = 1;
+    config.fontId = font_id();
     config.fontSize = static_cast<uint16_t>(std::lround(size * text_percent / 100.f));
     const Clay_StringSlice sample{static_cast<int32_t>(std::strlen(value)), value, value};
     return std::ceil(widgets_->measureText(sample, &config, widgets_->measureTextUserData).width);
@@ -925,7 +1023,7 @@ void View::apply_theme() {
     widgets_->theme.surfaceAltColor = widgets_->theme.surfaceColor;
     widgets_->theme.borderColor = light_theme() ? Clay_Color{205, 205, 205, 255} : Clay_Color{65, 65, 65, 255};
     widgets_->theme.hoverColor = light_theme() ? Clay_Color{230, 230, 230, 255} : Clay_Color{52, 52, 52, 255};
-    widgets_->theme.fontBody = widgets_->theme.fontHeading = 1;
+    widgets_->theme.fontBody = widgets_->theme.fontHeading = font_id();
     widgets_->theme.selectionColor = widgets_->theme.hoverColor;
     widgets_->theme.onSelectionColor = widgets_->theme.textColor;
     widgets_->theme.pressedColor = widgets_->theme.borderColor;

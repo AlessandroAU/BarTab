@@ -32,14 +32,21 @@ class App {
     bool hovered_{};
     // Settings keep the hover card open beside the taskbar as a live preview.
     bool hover_pinned_{};
+    // The card opens by growing out of the taskbar's side of it, content riding
+    // the moving edge, while fading in; progress is eased 0..1, 1 once open.
+    float hover_progress_{1.f};
+    bool hover_grows_up_{true};
+    int hover_offset_{};
+    std::chrono::steady_clock::time_point hover_opened_{};
     bool settings_mode_{};
     Preferences preferences_;
     SettingsEdit settings_edit_;
     std::filesystem::path settings_path_;
     ui::Pixels details_pixels_;
     ClayWidgets_Input details_pointer_{};
-    // The popup is the only animated surface. Input starts a short frame loop
-    // that keeps rendering with real deltaTime until the motion has settled.
+    // In the popup, input starts a short frame loop that keeps rendering with
+    // real deltaTime until the motion has settled. The hover card's opening is
+    // the only other motion, and it moves pixels rather than re-rendering.
     const bool animations_allowed_;
     std::chrono::steady_clock::time_point details_rendered_{};
     std::chrono::steady_clock::time_point details_settle_until_{};
@@ -58,6 +65,7 @@ class App {
 
     void load_settings();
     void update_system_font();
+    bool reload_ui_font();
     void update_animation_preference();
     bool save_settings(Preferences value);
     void begin_settings_preview();
@@ -76,6 +84,8 @@ class App {
     // A pinned card ignores pointer-driven hides unless forced.
     void hide_hover(bool force = false);
     void show_hover();
+    void shape_hover();
+    void animate_hover();
     void pin_hover();
     void unpin_hover();
     void avoid_hover(int& x, int& y, int width, int height, const RECT& work) const;
@@ -92,9 +102,11 @@ class App {
     void close_details();
     void render_details(ClayWidgets_Input input);
     void render_details_frame(ClayWidgets_Input input);
+    void set_details_cursor() const;
     void animate_details();
     void paint_details(HWND window);
-    static void paint_pixels(HWND window, const ui::Pixels& pixels);
+    // `y` shifts the pixels down; the window clips whatever falls outside.
+    static void paint_pixels(HWND window, const ui::Pixels& pixels, int y = 0);
     void details_event(HWND window, UINT message, WPARAM w, LPARAM l);
     void show_menu();
     void open_details(bool settings = false);

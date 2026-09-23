@@ -11,5 +11,7 @@ bool apps_light_theme();
 // The "Animation effects" accessibility switch; false asks for reduced motion.
 bool client_animations_enabled();
 Color windows_accent();
-std::vector<unsigned char> windows_ui_font();
+// The Windows UI font as raw TTF bytes. `bold` resolves the same family's
+// bold face rather than emboldening the regular one.
+std::vector<unsigned char> windows_ui_font(bool bold = false);
 } // namespace usage::windows

@@ -519,13 +519,55 @@ int main() {
         check(save_bounds.height > 0 && save_bounds.y + save_bounds.height <= 470,
               "Save fits settings window");
         live.claude.installed = true;
-        actual = settings.frame(live, neutral(), 1120, 700);
-        check(contains(actual.commands, "Appearance") && contains(actual.commands, "Codex usage") &&
-                  contains(actual.commands, "Claude usage"),
-              "Unified settings shows appearance and both providers");
-        check(settings.bounds("TextSizeSlider").width > 0 && settings.bounds("HoverTextSizeSlider").width > 0 &&
+        const auto click_in = [&](usage::ui::View& view, usage::Usage& state, const char* name) {
+            const auto bounds = view.bounds(name);
+            auto pointer = neutral();
+            pointer.mouseX = bounds.x + bounds.width / 2;
+            pointer.mouseY = bounds.y + bounds.height / 2;
+            view.frame(state, pointer, usage::ui::settings_width, usage::ui::settings_height);
+            pointer.pointerDown = pointer.pointerPressed = true;
+            view.frame(state, pointer, usage::ui::settings_width, usage::ui::settings_height);
+            pointer.pointerDown = pointer.pointerPressed = false;
+            pointer.pointerReleased = true;
+            return view.frame(state, pointer, usage::ui::settings_width, usage::ui::settings_height);
+        };
+        actual = settings.frame(live, neutral(), usage::ui::settings_width, usage::ui::settings_height);
+        check(settings.settings_page() == usage::ui::SettingsPage::Taskbar &&
+                  settings.bounds("TextSizeSlider").width > 0 && settings.bounds("BoldTaskbar").width > 0 &&
+                  settings.bounds("HoverTextSizeSlider").width == 0 && settings.bounds("EnableCodex").width == 0,
+              "Settings open on the taskbar page and show only its controls");
+        const auto nav = settings.bounds("SettingsNav"), page = settings.bounds("SettingsPage");
+        check(nav.width > 0 && nav.x + nav.width <= page.x, "The page list sits beside the page");
+        click_in(settings, live, "NavHover");
+        check(settings.settings_page() == usage::ui::SettingsPage::Hover &&
+                  settings.bounds("HoverTextSizeSlider").width > 0 && settings.bounds("BoldHover").width > 0 &&
+                  settings.bounds("TextSizeSlider").width == 0 &&
                   settings.bounds("HoverTextSizeSlider").y > settings.bounds("HoverEnabled").y,
-              "Unified settings has separate taskbar and hover text sliders");
+              "The sidebar switches to the hover card page, with its own text size");
+        click_in(settings, live, "NavGeneral");
+        check(settings.bounds("BoldSettings").width > 0 && settings.bounds("TimeFormat").width > 0,
+              "The general page holds the settings window's weight and the time format");
+        {
+            using usage::ui::SettingsPage;
+            const struct {
+                SettingsPage page;
+                const char* scroll;
+                const char* last;
+            } pages[] = {{SettingsPage::Taskbar, "TaskbarScroll", "BarHeight"},
+                         {SettingsPage::Hover, "HoverScroll", "HoverOpacity"},
+                         {SettingsPage::General, "GeneralScroll", "TimeFormat"}};
+            for (const auto& entry : pages) {
+                settings.set_settings_page(entry.page);
+                settings.frame(live, neutral(), usage::ui::settings_width, usage::ui::settings_height);
+                const auto scroll = settings.bounds(entry.scroll), last = settings.bounds(entry.last);
+                check(last.height > 0 && last.y + last.height <= scroll.y + scroll.height,
+                      "Every appearance page fits the default window without scrolling");
+            }
+        }
+        settings.set_settings_page(usage::ui::SettingsPage::Providers);
+        actual = settings.frame(live, neutral(), usage::ui::settings_width, usage::ui::settings_height);
+        check(contains(actual.commands, "Codex usage") && contains(actual.commands, "Claude usage"),
+              "The providers page shows both providers");
         check(contains(actual.commands, "Last error: Connection failed"), "Provider error remains readable");
         for (int i = 0; i < actual.commands.length; ++i) {
             const auto& command = actual.commands.internalArray[i];
@@ -533,7 +575,7 @@ int main() {
                 continue;
             const auto text = command.renderData.text.stringContents;
             const auto value = std::string(text.chars, static_cast<std::size_t>(text.length));
-            if (value == "Enable Codex" || value == "Roboto" || value == "Update interval" ||
+            if (value == "Enable Codex" || value == "Roboto" || value == "Update every" ||
                 value == "1 minute" || value == "Last error: Connection failed" ||
                 value == "Plan: Not reported")
                 check(command.renderData.text.fontSize == 18,
@@ -544,13 +586,13 @@ int main() {
         auto provider_wheel = neutral();
         provider_wheel.mouseX = providers_scroll.x + 30;
         provider_wheel.mouseY = providers_scroll.y + 100;
-        settings.frame(live, provider_wheel, 1120, 700);
+        settings.frame(live, provider_wheel, usage::ui::settings_width, usage::ui::settings_height);
         provider_wheel.scrollY = -20;
-        actual = settings.frame(live, provider_wheel, 1120, 700);
+        actual = settings.frame(live, provider_wheel, usage::ui::settings_width, usage::ui::settings_height);
         check(contains(actual.commands, "Fable weekly"),
               "All provider limits remain accessible by scrolling");
         provider_wheel.scrollY = 20;
-        settings.frame(live, provider_wheel, 1120, 700);
+        settings.frame(live, provider_wheel, usage::ui::settings_width, usage::ui::settings_height);
 
         check(settings.bounds("RefreshUsage").height > 0 &&
                   settings.bounds("CodexRefreshUsage").height == 0 &&
@@ -561,17 +603,17 @@ int main() {
         auto toggle_input = neutral();
         toggle_input.mouseX = toggle.x + toggle.width / 2;
         toggle_input.mouseY = toggle.y + toggle.height / 2;
-        settings.frame(live, toggle_input, 1120, 700);
+        settings.frame(live, toggle_input, usage::ui::settings_width, usage::ui::settings_height);
         toggle_input.pointerDown = toggle_input.pointerPressed = true;
-        settings.frame(live, toggle_input, 1120, 700);
+        settings.frame(live, toggle_input, usage::ui::settings_width, usage::ui::settings_height);
         toggle_input.pointerDown = toggle_input.pointerPressed = false;
         toggle_input.pointerReleased = true;
-        settings.frame(live, toggle_input, 1120, 700);
+        settings.frame(live, toggle_input, usage::ui::settings_width, usage::ui::settings_height);
         check(!settings.codex_enabled() && settings.claude_enabled() && live.codex_enabled,
               "Provider toggles edit a draft until save");
         const auto save_live = settings.bounds("SaveSettings"),
                    refresh_live = settings.bounds("RefreshUsage");
-        check(save_live.y + save_live.height <= 700 && refresh_live.y + refresh_live.height <= 700,
+        check(save_live.y + save_live.height <= usage::ui::settings_height && refresh_live.y + refresh_live.height <= usage::ui::settings_height,
               "Provider controls and actions fit settings");
         settings.set_providers(true, true);
 
@@ -579,34 +621,19 @@ int main() {
         auto click = neutral();
         click.mouseX = refresh.x + refresh.width / 2;
         click.mouseY = refresh.y + refresh.height / 2;
-        settings.frame(live, click, 1120, 700);
+        settings.frame(live, click, usage::ui::settings_width, usage::ui::settings_height);
         click.pointerDown = click.pointerPressed = true;
-        settings.frame(live, click, 1120, 700);
+        settings.frame(live, click, usage::ui::settings_width, usage::ui::settings_height);
         click.pointerDown = click.pointerPressed = false;
         click.pointerReleased = true;
-        check(settings.frame(live, click, 1120, 700).refresh, "Shared refresh requests updated usage");
+        check(settings.frame(live, click, usage::ui::settings_width, usage::ui::settings_height).refresh, "Shared refresh requests updated usage");
         check(settings.text_percent() == 300, "Usage refresh preserves pending appearance edits");
         live.codex.installed = live.claude.installed = false;
-        actual = settings.frame(live, neutral(), 1120, 700);
-        check(contains(actual.commands, "Not detected") && settings.bounds("SaveSettings").height > 0,
+        actual = settings.frame(live, neutral(), usage::ui::settings_width, usage::ui::settings_height);
+        check(contains(actual.commands, "Not detected \xC2\xB7 Not updated yet") && settings.bounds("SaveSettings").height > 0,
               "Settings remain available without providers");
-        const auto appearance_panel = settings.bounds("AppearancePanel"),
-                   provider_panel = settings.bounds("ProvidersPanel");
-        check(appearance_panel.x + appearance_panel.width <= provider_panel.x,
-              "Appearance and Providers are distinct panels");
-        const auto click_config = [&](const char* name) {
-            const auto bounds = settings.bounds(name);
-            auto pointer = neutral();
-            pointer.mouseX = bounds.x + bounds.width / 2;
-            pointer.mouseY = bounds.y + bounds.height / 2;
-            settings.frame(live, pointer, 1120, 700);
-            pointer.pointerDown = pointer.pointerPressed = true;
-            settings.frame(live, pointer, 1120, 700);
-            pointer.pointerDown = pointer.pointerPressed = false;
-            pointer.pointerReleased = true;
-            return settings.frame(live, pointer, 1120, 700);
-        };
-        check(!contains(settings.frame(live, neutral(), 1120, 700).commands, "Executable"),
+        const auto click_config = [&](const char* name) { return click_in(settings, live, name); };
+        check(!contains(settings.frame(live, neutral(), usage::ui::settings_width, usage::ui::settings_height).commands, "Executable"),
               "Connection details start collapsed");
         auto connection_frame = click_config("CodexConnection");
         check(contains(connection_frame.commands, "Executable"), "Connection details expand on click");
@@ -615,7 +642,7 @@ int main() {
         check(settings.bounds("FontChoice").width == 0 && settings.bounds("ThemeChoice").width == 0 &&
                   settings.bounds("AccentChoice").width == 0, "Windows appearance needs no manual selectors");
         const auto background = [&]() {
-            auto frame = settings.frame(live, neutral(), 1120, 700);
+            auto frame = settings.frame(live, neutral(), usage::ui::settings_width, usage::ui::settings_height);
             for (int i = 0; i < frame.commands.length; ++i) {
                 const auto& command = frame.commands.internalArray[i];
                 if (command.commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE &&
@@ -632,34 +659,25 @@ int main() {
         click_config("CodexInterval");
         auto interval_key = neutral();
         interval_key.keyEnd = true;
-        settings.frame(live, interval_key, 1120, 700);
+        settings.frame(live, interval_key, usage::ui::settings_width, usage::ui::settings_height);
         interval_key = neutral();
         interval_key.keyEnter = true;
-        settings.frame(live, interval_key, 1120, 700);
+        settings.frame(live, interval_key, usage::ui::settings_width, usage::ui::settings_height);
         check(settings.preferences().codex_interval == 900 && settings.preferences().claude_interval == 60,
               "Provider intervals are independent");
         click_config("ClaudeInterval");
         interval_key = neutral();
         interval_key.keyEscape = true;
-        check(!settings.frame(live, interval_key, 1120, 700).close &&
+        check(!settings.frame(live, interval_key, usage::ui::settings_width, usage::ui::settings_height).close &&
                   settings.preferences().claude_interval == 60,
               "Escape dismisses the dropdown without closing Settings");
         const auto footer = settings.bounds("SaveSettings");
         const auto cancel = settings.bounds("CancelSettings");
-        check(cancel.y == footer.y && cancel.y + cancel.height <= 700,
+        check(cancel.y == footer.y && cancel.y + cancel.height <= usage::ui::settings_height,
               "Save and Cancel share the footer");
         check(settings.bounds("RefreshUsage").y < settings.bounds("ProvidersScroll").y,
               "Refresh sits above usage readings");
 
-        auto scroll_input = neutral();
-        scroll_input.mouseX = appearance_panel.x + 30;
-        scroll_input.mouseY = appearance_panel.y + 100;
-        settings.frame(live, scroll_input, 1120, 700);
-        const auto delay_before = settings.bounds("HoverDelay");
-        scroll_input.scrollY = -20;
-        settings.frame(live, scroll_input, 1120, 700);
-        check(settings.bounds("HoverDelay").y < delay_before.y,
-              "Appearance panel scrolls to additional controls");
         click_config("ResetAppearance");
         check(settings.preferences().appearance == usage::Appearance{} &&
                   settings.preferences().codex_interval == 900,
@@ -672,12 +690,46 @@ int main() {
         for (int i = 0; i < actual.commands.length; ++i) {
             const auto& command = actual.commands.internalArray[i];
             if (command.commandType == CLAY_RENDER_COMMAND_TYPE_TEXT) {
-                check(command.renderData.text.fontId == 1, "Windows font reaches taskbar text");
+                check(command.renderData.text.fontId == usage::ui::regular_font, "Windows font reaches taskbar text");
                 const auto value = command.renderData.text.stringContents;
                 check(std::string(value.chars, static_cast<std::size_t>(value.length)).find("reset ") ==
                           std::string::npos,
                       "Reset label visibility is configurable");
             }
+        }
+        {
+            const auto uses = [](const usage::ui::Frame& frame, uint16_t font) {
+                for (int i = 0; i < frame.commands.length; ++i) {
+                    const auto& command = frame.commands.internalArray[i];
+                    if (command.commandType == CLAY_RENDER_COMMAND_TYPE_TEXT &&
+                        command.renderData.text.fontId == font)
+                        return true;
+                }
+                return false;
+            };
+            auto bold = usage::Preferences{};
+            bold.appearance.bold_taskbar = true;
+            widget.set_preferences(bold);
+            hover.set_preferences(bold);
+            check(uses(widget.frame(live, neutral(), 208, 38), usage::ui::bold_font) &&
+                      !uses(widget.frame(live, neutral(), 208, 38), usage::ui::regular_font) &&
+                      !uses(hover.frame(live, neutral(), 320, 250), usage::ui::bold_font),
+                  "Bold taskbar text leaves the hover card regular");
+            bold.appearance.bold_taskbar = false;
+            bold.appearance.bold_hover = true;
+            widget.set_preferences(bold);
+            hover.set_preferences(bold);
+            check(uses(hover.frame(live, neutral(), 320, 250), usage::ui::bold_font) &&
+                      !uses(widget.frame(live, neutral(), 208, 38), usage::ui::bold_font),
+                  "The hover card has its own bold switch");
+            bold.appearance.bold_hover = false;
+            bold.appearance.bold_settings = true;
+            settings.set_preferences(bold);
+            settings.set_settings_page(usage::ui::SettingsPage::Taskbar);
+            check(!uses(settings.frame(live, neutral(), usage::ui::settings_width, usage::ui::settings_height), usage::ui::regular_font),
+                  "The settings window's bold switch reaches every settings label");
+            hover.set_preferences(baseline);
+            settings.set_preferences(usage::Preferences{});
         }
         widget.set_preferences(usage::Preferences{});
         widget.set_text_percent(140);

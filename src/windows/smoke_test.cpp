@@ -118,7 +118,6 @@ void App::finish_smoke_test() {
         // Exercise the same click handler and slider notification used interactively.
         const auto foreground = GetForegroundWindow();
         SendMessageW(widget_, WM_MOUSEMOVE, 0, MAKELPARAM(2, 2));
-        SendMessageW(widget_, WM_MOUSEHOVER, 0, MAKELPARAM(2, 2));
         hover_shown = IsWindowVisible(hover_) && GetForegroundWindow() == foreground;
         if (hover_shown) {
             UpdateWindow(hover_);
@@ -135,7 +134,6 @@ void App::finish_smoke_test() {
         hover_left = grace && !IsWindowVisible(hover_);
         SetCursorPos(saved_pointer.x, saved_pointer.y);
         SendMessageW(widget_, WM_MOUSEMOVE, 0, MAKELPARAM(2, 2));
-        SendMessageW(widget_, WM_MOUSEHOVER, 0, MAKELPARAM(2, 2));
         SendMessageW(widget_, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(2, 2));
         SendMessageW(widget_, WM_LBUTTONUP, 0, MAKELPARAM(2, 2));
         hover_click = !IsWindowVisible(hover_);
@@ -223,12 +221,31 @@ void App::finish_smoke_test() {
     usage_.claude.executable_path = "C:/Demo/Claude/claude.exe";
     usage_.claude.updated = std::time(nullptr);
     open_details();
-    const bool unified = settings_mode_ && details_view_.bounds("TextSizeSlider").width > 0 &&
-                         details_view_.bounds("HoverTextSizeSlider").width > 0 &&
-                         details_view_.bounds("LiveUsageCodex").width > 0 &&
-                         details_view_.bounds("LiveUsageClaude").width > 0 &&
-                         details_view_.bounds("RefreshUsage").height > 0;
-    SendMessageW(popup_, WM_KEYDOWN, VK_TAB, 0);
+    // The panel shows one sidebar page at a time; these switch pages and move
+    // keyboard focus the way a user would, without counting tab stops.
+    const auto show_page = [&](ui::SettingsPage page) {
+        details_view_.set_settings_page(page);
+        render_details(details_pointer_);
+    };
+    const auto tab_to = [&](const char* name) {
+        for (int i = 0; i < 32 && !details_view_.focused(name); ++i)
+            SendMessageW(popup_, WM_KEYDOWN, VK_TAB, 0);
+        return details_view_.focused(name);
+    };
+    show_page(ui::SettingsPage::Taskbar);
+    bool unified = settings_mode_ && details_view_.bounds("TextSizeSlider").width > 0 &&
+                   details_view_.bounds("BoldTaskbar").width > 0;
+    show_page(ui::SettingsPage::Hover);
+    unified = unified && details_view_.bounds("HoverTextSizeSlider").width > 0 &&
+              details_view_.bounds("BoldHover").width > 0;
+    show_page(ui::SettingsPage::General);
+    unified = unified && details_view_.bounds("BoldSettings").width > 0;
+    show_page(ui::SettingsPage::Providers);
+    unified = unified && details_view_.bounds("LiveUsageCodex").width > 0 &&
+              details_view_.bounds("LiveUsageClaude").width > 0 &&
+              details_view_.bounds("RefreshUsage").height > 0;
+    show_page(ui::SettingsPage::Taskbar);
+    unified = tab_to("TextSizeSlider") && unified;
     SendMessageW(popup_, WM_KEYDOWN, VK_HOME, 0);
     open_details(true);
     const bool unified_edits = details_view_.text_percent() == 100 &&
@@ -276,6 +293,7 @@ void App::finish_smoke_test() {
     };
     const bool font_preview = details_view_.bounds("FontChoice").width == 0;
     const bool theme_preview = details_view_.bounds("ThemeChoice").width == 0;
+    show_page(ui::SettingsPage::Providers);
     click_setting("CodexInterval");
     UpdateWindow(popup_);
     DwmFlush();
@@ -310,10 +328,12 @@ void App::finish_smoke_test() {
         GetPrivateProfileIntW(L"Providers", L"CodexInterval", 0, settings_path_.c_str()) == 900 &&
         GetPrivateProfileIntW(L"Appearance", L"HoverOpacity", 0, settings_path_.c_str()) == 95;
     open_details();
+    show_page(ui::SettingsPage::Providers);
     click_setting("EnableClaude");
     const bool all_disabled_preview = !usage_.codex_enabled && !usage_.claude_enabled;
     SendMessageW(popup_, WM_KEYDOWN, VK_ESCAPE, 0);
     open_details();
+    show_page(ui::SettingsPage::Providers);
     const bool retained_detection =
         details_view_.bounds("EnableCodex").width > 0 && !usage_.codex_enabled && usage_.codex.installed;
     click_setting("ClaudeInterval");
@@ -338,6 +358,7 @@ void App::finish_smoke_test() {
         widget_view_.bounds("ClaudeGeneral").width > 0 && widget_view_.bounds("ClaudeFable").width > 0;
     capture_widget(widget_bounds_, executable_directory() / L"claude-only-taskbar.bmp");
     open_details();
+    show_page(ui::SettingsPage::Taskbar);
     click_setting("WidgetWidth");
     SendMessageW(popup_, WM_KEYDOWN, VK_HOME, 0);
     if (widget_)
