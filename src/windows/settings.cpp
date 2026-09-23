@@ -12,7 +12,8 @@ void App::load_settings() {
         const auto length =
             GetEnvironmentVariableW(L"LOCALAPPDATA", local, static_cast<DWORD>(std::size(local)));
         if (length > 0 && length < std::size(local))
-            settings_path_ = std::filesystem::path(local) / L"UsageTracker" / L"settings.ini";
+            settings_path_ = std::filesystem::path(local) / L"UsageTracker" /
+                             (mock_ ? L"debug-settings.ini" : L"settings.ini");
         preferences_ = read_settings(settings_path_);
     }
     usage_.codex_enabled = preferences_.codex_enabled;

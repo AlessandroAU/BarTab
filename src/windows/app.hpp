@@ -5,25 +5,35 @@
 #include "ui/raylib_renderer.hpp"
 #include <shellapi.h>
 #include <filesystem>
+#include <functional>
 
 namespace usage::windows {
 inline constexpr UINT tray_message = WM_APP + 1;
 inline constexpr wchar_t controller_class[] = L"UsageTracker.Controller.Cpp";
-inline constexpr wchar_t widget_class[] = L"UsageTracker.Widget.Cpp";
 inline constexpr wchar_t popup_class[] = L"UsageTracker.Popup.Cpp";
 inline constexpr wchar_t hover_class[] = L"UsageTracker.Hover.Cpp";
 
 class App {
   public:
-    explicit App(bool smoke, bool live_test = false);
+    // With `mock`, the providers are the debug build's mock endpoints rather
+    // than the installed CLIs, and settings go to a file of their own.
+    explicit App(bool smoke, bool live_test = false, std::shared_ptr<MockProviders> mock = nullptr);
     ~App();
     App(const App&) = delete;
     App& operator=(const App&) = delete;
     int run();
+    // The mock scenario changed: detect and read the providers again.
+    void mock_changed();
+    // Adds a tray menu entry that reopens the debug build's mock panel.
+    void set_mock_panel(std::function<void()> open) {
+        open_mock_panel_ = std::move(open);
+    }
 
   private:
     Usage usage_;
     std::unique_ptr<UsageReader> codex_, claude_;
+    std::shared_ptr<MockProviders> mock_;
+    std::function<void()> open_mock_panel_;
     ui::Renderer renderer_;
     ui::View widget_view_{ui::Surface::Widget, ui::Renderer::measure_callback, &renderer_};
     ui::View details_view_{ui::Surface::Details, ui::Renderer::measure_callback, &renderer_};

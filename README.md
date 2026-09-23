@@ -132,7 +132,7 @@ Keep vendored dependencies out of formatting passes.
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-Twelve suites cover provider protocols, process transport, settings persistence and cancellation, placement, allowance limits, Clay layouts, pointer dragging, focus, keyboard navigation, library linkage, and the upstream clay-widgets suite (566 checks). Checks stay active in Release builds.
+Thirteen suites cover provider protocols, mock provider scenarios, process transport, settings persistence and cancellation, placement, allowance limits, Clay layouts, pointer dragging, focus, keyboard navigation, library linkage, and the upstream clay-widgets suite (566 checks). Checks stay active in Release builds.
 
 A live desktop smoke test exercises the real taskbar, hit detection, native mouse messages routed into Clay, and settings save/cancel. Run it unlocked with no other instance:
 
@@ -145,6 +145,17 @@ Get-Content .\bin\smoke-test.txt
 It uses an isolated `smoke-settings.ini`, stays offline, writes diagnostic bitmaps beside the executable, and exits after about eight seconds. It does not restart Explorer or change Windows settings. `--live-smoke-test` is the online variant against real signed-in providers, reporting to `bin/codex-live-test.txt`.
 
 Logs: `%LOCALAPPDATA%\UsageTracker\prototype.log`. Tested on Windows 11 build 26200 at 100% scaling with MSVC 19.44, and on Ubuntu 22.04 (WSL, GCC 11.4) for the portable tests.
+
+### Mock providers (debug build)
+
+`bin\UsageTrackerDebug.exe` is the same app with the Codex and Claude CLIs replaced by mock endpoints, for trying every provider combination without the accounts to match. It opens a **Mock providers** window (reopen it from the tray menu) with:
+
+- **Scenario** presets: both providers, Codex only with 5 hour + weekly, weekly only or 5 hour only, Claude only with or without a model window, near the limits, a login error, a malformed reply, both connecting, and nothing installed.
+- Per provider: its state (Ready, Not installed, Login error, Connecting, Malformed reply), the plan, and for each allowance whether it is reported, how much is used, and when it resets. Codex also has credits and earned resets; Claude has the model-scoped window's name.
+
+Every change applies immediately. The mocks answer each CLI's real wire protocol, so readings still pass through the protocol handling, the parsers, the reader threads and their error handling. The debug build takes its own instance lock and saves to `debug-settings.ini`, so it can run beside the installed copy without touching its settings; the two widgets keep out of each other's way on the taskbar.
+
+The `mock_providers` test renders every preset on the taskbar, hover card, details and settings surfaces and checks each lays out as expected; a new preset must be given an expected layout there.
 
 ### Regenerating the screenshots
 

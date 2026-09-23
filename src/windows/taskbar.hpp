@@ -6,6 +6,7 @@
 #include <string>
 
 namespace usage::windows {
+inline constexpr wchar_t widget_class[] = L"UsageTracker.Widget.Cpp";
 struct Snapshot {
     HWND taskbar{};
     Rect bounds{};

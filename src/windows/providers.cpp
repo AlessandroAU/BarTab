@@ -26,8 +26,8 @@ void UsageReader::set_interval(int seconds) {
     interval_changed_ = true;
     wake_.notify_all();
 }
-UsageReader::UsageReader(Service service, AccountUsage initial)
-    : service_(service), latest_(std::move(initial)), worker_([this] { run(); }) {}
+UsageReader::UsageReader(Service service, AccountUsage initial, std::shared_ptr<const MockProviders> mock)
+    : service_(service), mock_(std::move(mock)), latest_(std::move(initial)), worker_([this] { run(); }) {}
 UsageReader::~UsageReader() {
     stop_ = true;
     wake_.notify_all();
@@ -47,6 +47,39 @@ bool UsageReader::take(AccountUsage& result) {
     changed_ = false;
     return true;
 }
+AccountUsage UsageReader::read_installed() {
+    const auto detection = find_service(service_);
+    const auto& exe = detection.path;
+    AccountUsage result;
+    result.installed = !exe.empty();
+    result.error = detection.error;
+    if (result.installed) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            latest_.installed = true;
+            const auto path = exe.u8string();
+            latest_.executable_path.assign(path.begin(), path.end());
+            changed_ = true;
+        }
+        result = read_limits(stop_, exe, service_);
+    }
+    const auto path = exe.u8string();
+    result.executable_path.assign(path.begin(), path.end());
+    return result;
+}
+AccountUsage UsageReader::read_mocked() {
+    const auto provider = mock_->provider(service_);
+    if (provider.state != MockState::Missing) {
+        // As with a real CLI: found first, so a failed read still counts as installed.
+        std::lock_guard<std::mutex> lock(mutex_);
+        latest_.installed = true;
+        latest_.executable_path = mock_path(service_);
+    }
+    auto result = read_mock(service_, provider, std::time(nullptr));
+    if (result.installed)
+        result.executable_path = mock_path(service_);
+    return result;
+}
 void UsageReader::run() {
     while (!stop_) {
         {
@@ -54,23 +87,7 @@ void UsageReader::run() {
             requested_ = false;
         }
         try {
-            const auto detection = find_service(service_);
-            const auto& exe = detection.path;
-            AccountUsage result;
-            result.installed = !exe.empty();
-            result.error = detection.error;
-            if (result.installed) {
-                {
-                    std::lock_guard<std::mutex> lock(mutex_);
-                    latest_.installed = true;
-                    const auto path = exe.u8string();
-                    latest_.executable_path.assign(path.begin(), path.end());
-                    changed_ = true;
-                }
-                result = read_limits(stop_, exe, service_);
-            }
-            const auto path = exe.u8string();
-            result.executable_path.assign(path.begin(), path.end());
+            auto result = mock_ ? read_mocked() : read_installed();
             std::lock_guard<std::mutex> lock(mutex_);
             latest_ = std::move(result);
             changed_ = true;

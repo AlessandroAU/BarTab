@@ -6,8 +6,8 @@
 
 namespace usage::windows {
 
-App::App(bool smoke, bool live_test)
-    : animations_allowed_(!smoke), smoke_(smoke), demo_mode_(smoke), live_test_(live_test) {
+App::App(bool smoke, bool live_test, std::shared_ptr<MockProviders> mock)
+    : mock_(std::move(mock)), animations_allowed_(!smoke), smoke_(smoke), demo_mode_(smoke), live_test_(live_test) {
     register_class(controller_class, controller_proc);
     register_class(widget_class, widget_proc);
     register_class(popup_class, popup_proc);
@@ -176,7 +176,7 @@ void App::add_tray() {
 }
 
 void App::update_tooltip() {
-    std::wstring text = L"UsageTracker";
+    std::wstring text = mock_ ? L"UsageTracker (mock providers)" : L"UsageTracker";
     if (usage_.live) {
         for (const auto& entry : {std::pair<const wchar_t*, const AccountUsage*>{L"Codex", &usage_.codex},
                                   {L"Claude", &usage_.claude}}) {
@@ -210,6 +210,8 @@ void App::show_menu() {
         return;
     const auto startup = startup_state();
     AppendMenuW(menu, MF_STRING, 4, L"Settings");
+    if (open_mock_panel_)
+        AppendMenuW(menu, MF_STRING, 7, L"Mock providers...");
     AppendMenuW(menu,
                 MF_STRING | (startup.enabled ? MF_CHECKED : MF_UNCHECKED) |
                     (startup.error == ERROR_SUCCESS ? 0 : MF_GRAYED),
@@ -226,6 +228,8 @@ void App::show_menu() {
         PostQuitMessage(0);
     if (selected == 4)
         open_details(true);
+    if (selected == 7)
+        open_mock_panel_();
     if (selected == 6) {
         const auto status = set_startup(!startup.enabled);
         if (status != ERROR_SUCCESS) {
@@ -243,6 +247,16 @@ void App::show_menu() {
 void App::detect_providers() {
     if (demo_mode_)
         return;
+    if (mock_) {
+        for (const auto service : {Service::Codex, Service::Claude}) {
+            auto& account = service == Service::Claude ? usage_.claude : usage_.codex;
+            account.installed = mock_->provider(service).state != MockState::Missing;
+            account.executable_path = account.installed ? mock_path(service) : std::string{};
+            if (!account.installed)
+                account.error.clear();
+        }
+        return;
+    }
     detect_service(Service::Codex, usage_.codex);
     detect_service(Service::Claude, usage_.claude);
 }
@@ -251,16 +265,27 @@ void App::apply_providers() {
         return;
     if (usage_.codex_enabled) {
         if (!codex_)
-            codex_ = std::make_unique<UsageReader>(Service::Codex, usage_.codex);
+            codex_ = std::make_unique<UsageReader>(Service::Codex, usage_.codex, mock_);
         codex_->set_interval(preferences_.codex_interval);
     } else
         codex_.reset();
     if (usage_.claude_enabled) {
         if (!claude_)
-            claude_ = std::make_unique<UsageReader>(Service::Claude, usage_.claude);
+            claude_ = std::make_unique<UsageReader>(Service::Claude, usage_.claude, mock_);
         claude_->set_interval(preferences_.claude_interval);
     } else
         claude_.reset();
+}
+
+void App::mock_changed() {
+    detect_providers();
+    if (codex_)
+        codex_->refresh();
+    if (claude_)
+        claude_->refresh();
+    update_usage();
+    if (IsWindowVisible(popup_))
+        render_details(details_pointer_);
 }
 
 } // namespace usage::windows

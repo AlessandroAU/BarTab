@@ -58,6 +58,15 @@ Snapshot read_snapshot(IUIAutomation* automation) {
         if (!occupied.empty())
             result.occupied.push_back(occupied);
     }
+    // Another instance's widget, such as the debug build's beside the installed
+    // app, is a plain child window that UI Automation does not list as a button.
+    for (HWND other = nullptr; (other = FindWindowExW(result.taskbar, other, widget_class, nullptr));) {
+        DWORD process{};
+        GetWindowThreadProcessId(other, &process);
+        const auto rect = window_rect(other);
+        if (process != GetCurrentProcessId() && IsWindowVisible(other) && !rect.empty())
+            result.occupied.push_back(rect);
+    }
     if (!result.occupied.empty())
         result.error.clear();
     return result;

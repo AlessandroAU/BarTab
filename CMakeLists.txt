@@ -40,7 +40,8 @@ else()
     add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 endif()
 
-add_library(usage_core STATIC src/core/usage.cpp src/core/codex.cpp src/core/claude.cpp src/core/provider_protocol.cpp)
+add_library(usage_core STATIC src/core/usage.cpp src/core/codex.cpp src/core/claude.cpp src/core/provider_protocol.cpp
+    src/core/mock_provider.cpp)
 target_include_directories(usage_core SYSTEM PRIVATE vendor/nlohmann)
 if(MSVC)
     target_compile_definitions(usage_core PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -103,6 +104,9 @@ if(BUILD_TESTING)
         target_compile_options(clay_widgets_tests PRIVATE -w)
     endif()
     add_test(NAME clay_widgets COMMAND clay_widgets_tests)
+    add_executable(mock_provider_tests tests/mock_provider_tests.cpp)
+    target_link_libraries(mock_provider_tests PRIVATE usage_ui)
+    add_test(NAME mock_providers COMMAND mock_provider_tests)
     add_executable(usage_core_tests tests/core_tests.cpp)
     target_link_libraries(usage_core_tests PRIVATE usage_core)
     add_test(NAME usage_core COMMAND usage_core_tests)
@@ -158,9 +162,8 @@ if(WIN32)
     target_compile_definitions(usage_renderer PRIVATE CloseWindow=UsageTrackerRaylibCloseWindow CLAY_WIDGETS_FREETYPE)
     target_include_directories(usage_renderer SYSTEM PRIVATE "${CLAY_WIDGETS_DIR}")
     target_link_libraries(usage_renderer PUBLIC usage_ui PRIVATE raylib freetype)
-    add_executable(UsageTracker WIN32
-        src/windows/resources.rc
-        src/windows/main.cpp
+    # Everything but the entry point, shared by the app and its debug build.
+    add_library(usage_host OBJECT
         src/windows/app.cpp
         src/windows/platform.cpp
         src/windows/settings.cpp
@@ -175,10 +178,18 @@ if(WIN32)
         src/windows/smoke_test.cpp
         src/windows/taskbar.cpp
     )
-    target_compile_definitions(UsageTracker PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
-    target_include_directories(UsageTracker PRIVATE assets)
-    target_link_libraries(UsageTracker PRIVATE usage_renderer user32 gdi32 shell32 ole32 oleaut32 uiautomationcore dwmapi advapi32)
+    target_compile_definitions(usage_host PUBLIC UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
+    target_include_directories(usage_host PUBLIC assets)
+    target_link_libraries(usage_host PUBLIC usage_renderer user32 gdi32 shell32 ole32 oleaut32 uiautomationcore dwmapi advapi32)
+    add_executable(UsageTracker WIN32 src/windows/resources.rc src/windows/main.cpp)
+    target_link_libraries(UsageTracker PRIVATE usage_host)
     target_link_options(UsageTracker PRIVATE "/MANIFEST:EMBED" "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/app.manifest")
+    # The same app with mock provider endpoints and a control panel to set
+    # them, for trying every provider combination without real accounts.
+    add_executable(UsageTrackerDebug WIN32 src/windows/resources.rc src/windows/main.cpp src/windows/mock_panel.cpp)
+    target_compile_definitions(UsageTrackerDebug PRIVATE USAGETRACKER_MOCK)
+    target_link_libraries(UsageTrackerDebug PRIVATE usage_host comctl32)
+    target_link_options(UsageTrackerDebug PRIVATE "/MANIFEST:EMBED" "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/app.manifest")
 
     # Regenerates the README images offscreen. Not part of the test suite: it
     # needs a GPU context and writes into the source tree.
@@ -208,7 +219,7 @@ if(WIN32)
         target_link_libraries(startup_tests PRIVATE advapi32)
         add_test(NAME startup_toggle COMMAND startup_tests)
     endif()
-    install(TARGETS UsageTracker RUNTIME DESTINATION .)
+    install(TARGETS UsageTracker UsageTrackerDebug RUNTIME DESTINATION .)
     install(FILES "${CLAY_WIDGETS_DIR}/subprojects/clay/LICENSE.md" DESTINATION licenses RENAME clay.txt)
     install(FILES "${CLAY_WIDGETS_DIR}/LICENSE" DESTINATION licenses RENAME clay-widgets.txt)
     install(FILES "${CLAY_WIDGETS_DIR}/subprojects/raylib/LICENSE" DESTINATION licenses RENAME raylib.txt)
