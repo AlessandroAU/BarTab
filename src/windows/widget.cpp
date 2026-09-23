@@ -8,10 +8,12 @@
 
 namespace usage::windows {
 namespace {
-constexpr UINT hover_open_timer = 3;
 constexpr auto hover_open_duration = std::chrono::milliseconds(200);
 // The card starts this fraction of its height tall and grows to full.
 constexpr float hover_open_start = 0.0f;
+// Room around the widget for the burst to rise and spread into, in DIPs.
+constexpr float confetti_rise = 300.f, confetti_spread = 300.f;
+constexpr int confetti_pieces = 250;
 } // namespace
 
 LRESULT CALLBACK App::widget_proc(HWND window, UINT message, WPARAM w, LPARAM l) {
@@ -26,6 +28,13 @@ LRESULT CALLBACK App::widget_proc(HWND window, UINT message, WPARAM w, LPARAM l)
         case WM_MOUSEACTIVATE:
             return MA_NOACTIVATE;
         case WM_MOUSEMOVE:
+            if (app->active_widget_ != window) {
+                app->active_widget_ = window;
+                if (app->hovered_) {
+                    app->invalidate_widgets();
+                    app->show_hover();
+                }
+            }
             if (app->hover_ && IsWindowVisible(app->hover_)) {
                 KillTimer(app->hover_, 1);
                 TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, window, 0};
@@ -68,10 +77,17 @@ LRESULT CALLBACK App::widget_proc(HWND window, UINT message, WPARAM w, LPARAM l)
             return 0;
         case WM_NCDESTROY:
             app->hide_hover(true);
-            if (app->widget_ == window) {
-                app->widget_ = nullptr;
-                app->widget_bounds_ = {};
+            if (app->primary_.window == window) {
+                app->primary_.window = nullptr;
+                app->primary_.bounds = {};
             }
+            for (auto& widget : app->secondary_)
+                if (widget.window == window) {
+                    widget.window = nullptr;
+                    widget.bounds = {};
+                }
+            if (app->active_widget_ == window)
+                app->active_widget_ = nullptr;
             break;
         }
     }
@@ -109,17 +125,13 @@ LRESULT CALLBACK App::hover_proc(HWND window, UINT message, WPARAM w, LPARAM l) 
             RECT card{}, widget{};
             GetCursorPos(&pointer);
             GetWindowRect(window, &card);
-            GetWindowRect(app->widget_, &widget);
+            GetWindowRect(app->active().window, &widget);
             if (!PtInRect(&card, pointer) && !PtInRect(&widget, pointer))
                 app->hide_hover();
             return 0;
         }
         if (message == WM_TIMER && w == 2) {
             app->show_hover();
-            return 0;
-        }
-        if (message == WM_TIMER && w == hover_open_timer) {
-            app->animate_hover();
             return 0;
         }
     }
@@ -131,8 +143,8 @@ void App::hide_hover(bool force) {
         // Keep the preview card; only drop the widget's hover highlight.
         if (hover_)
             KillTimer(hover_, 1);
-        if (widget_ && IsWindow(widget_) && hovered_)
-            InvalidateRect(widget_, nullptr, FALSE);
+        if (hovered_)
+            invalidate_widgets();
         hovered_ = false;
         widget_view_.set_hovered(false);
         return;
@@ -140,15 +152,14 @@ void App::hide_hover(bool force) {
     if (hover_) {
         KillTimer(hover_, 1);
         KillTimer(hover_, 2);
-        KillTimer(hover_, hover_open_timer);
         ShowWindow(hover_, SW_HIDE);
     }
-    if (widget_ && IsWindow(widget_)) {
-        TRACKMOUSEEVENT tracking{sizeof(tracking), TME_CANCEL | TME_LEAVE, widget_, 0};
+    if (const auto window = active().window; window && IsWindow(window)) {
+        TRACKMOUSEEVENT tracking{sizeof(tracking), TME_CANCEL | TME_LEAVE, window, 0};
         TrackMouseEvent(&tracking);
-        if (hovered_)
-            InvalidateRect(widget_, nullptr, FALSE);
     }
+    if (hovered_)
+        invalidate_widgets();
     hovered_ = false;
     widget_view_.set_hovered(false);
 }
@@ -164,8 +175,10 @@ void App::unpin_hover() {
 }
 
 void App::show_hover() {
-    if (!preferences_.appearance.hover_enabled || !(hovered_ || hover_pinned_) || !IsWindowVisible(widget_) ||
-        widget_bounds_.empty())
+    const auto& anchor_widget = active();
+    const auto& widget_bounds = anchor_widget.bounds;
+    if (!preferences_.appearance.hover_enabled || !(hovered_ || hover_pinned_) ||
+        !IsWindowVisible(anchor_widget.window) || widget_bounds.empty())
         return;
     if (!hover_) {
         hover_ = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_LAYERED,
@@ -175,34 +188,34 @@ void App::show_hover() {
             return;
     }
     const bool opening = !IsWindowVisible(hover_);
-    const UINT dpi = GetDpiForWindow(widget_);
+    const UINT dpi = GetDpiForWindow(anchor_widget.window);
     const float scale = dpi ? dpi / 96.f : 1.f;
-    auto logical = ui::hover_size(usage_, preferences_.appearance.hover_text_percent);
-    logical.width = widget_bounds_.width / scale;
+    auto logical = ui::hover_size(usage_, preferences_.appearance.hover_text_scale());
+    logical.width = widget_bounds.width / scale;
     renderer_.set_surface(scale, hover_view_.text_gamma());
     hover_view_.invalidate_measurements();
     if (usage_.live) logical.height = hover_view_.hover_height(usage_, logical.width);
     int width = static_cast<int>(std::lround(logical.width * scale));
     const int height = static_cast<int>(std::lround(logical.height * scale));
-    RECT anchor{widget_bounds_.x, widget_bounds_.y, widget_bounds_.right(), widget_bounds_.bottom()};
+    RECT anchor{widget_bounds.x, widget_bounds.y, widget_bounds.right(), widget_bounds.bottom()};
     MONITORINFO monitor{sizeof(monitor)};
     GetMonitorInfoW(MonitorFromRect(&anchor, MONITOR_DEFAULTTONEAREST), &monitor);
     width = std::min(width, static_cast<int>(monitor.rcWork.right - monitor.rcWork.left));
     logical.width = width / scale;
     const int x =
         std::max(static_cast<int>(monitor.rcWork.left),
-                 std::min(widget_bounds_.right() - width, static_cast<int>(monitor.rcWork.right) - width));
+                 std::min(widget_bounds.right() - width, static_cast<int>(monitor.rcWork.right) - width));
     const int y = std::max(static_cast<int>(monitor.rcWork.top),
-                           std::min(widget_bounds_.y - height - static_cast<int>(8 * scale),
+                           std::min(widget_bounds.y - height - static_cast<int>(8 * scale),
                                     static_cast<int>(monitor.rcWork.bottom) - height));
     if (opening) {
         // Grow away from the taskbar: upward when the card sits above the widget.
-        hover_grows_up_ = y + height / 2 < widget_bounds_.y + widget_bounds_.height / 2;
+        hover_grows_up_ = y + height / 2 < widget_bounds.y + widget_bounds.height / 2;
         const bool animate = animations_allowed_ && client_animations_enabled();
         hover_progress_ = animate ? 0.f : 1.f;
         hover_opened_ = std::chrono::steady_clock::now();
         if (animate)
-            SetTimer(hover_, hover_open_timer, 16, nullptr);
+            frames_->start();
     }
     SetWindowPos(hover_, HWND_TOPMOST, x, y, width, height, SWP_NOACTIVATE);
     const auto frame = hover_view_.frame(usage_, {}, logical.width, logical.height);
@@ -232,30 +245,128 @@ void App::shape_hover() {
         LWA_ALPHA);
 }
 
-void App::animate_hover() {
+bool App::animate_hover() {
     const float t = std::min(1.f, std::chrono::duration<float>(std::chrono::steady_clock::now() - hover_opened_) /
                                       std::chrono::duration<float>(hover_open_duration));
     // Ease out: most of the growth early, settling gently into place.
     hover_progress_ = 1.f - (1.f - t) * (1.f - t) * (1.f - t);
-    if (t >= 1.f)
-        KillTimer(hover_, hover_open_timer);
     shape_hover();
     InvalidateRect(hover_, nullptr, FALSE);
+    return t < 1.f;
 }
 
 void App::reset_widget() {
     hide_hover(true);
-    if (widget_ && IsWindow(widget_))
-        DestroyWindow(widget_);
-    widget_ = nullptr;
-    widget_bounds_ = {};
+    if (primary_.window && IsWindow(primary_.window))
+        DestroyWindow(primary_.window);
+    primary_.window = nullptr;
+    primary_.bounds = {};
+    sync_secondary({});
+}
+
+const TaskbarWidget& App::active() const {
+    for (const auto& widget : secondary_)
+        if (widget.window && widget.window == active_widget_ && !widget.bounds.empty())
+            return widget;
+    return primary_;
+}
+
+void App::invalidate_widgets() const {
+    if (primary_.window)
+        InvalidateRect(primary_.window, nullptr, FALSE);
+    for (const auto& widget : secondary_)
+        if (widget.window)
+            InvalidateRect(widget.window, nullptr, FALSE);
+}
+
+App::Placement App::place(TaskbarWidget& widget, const Snapshot& snapshot) {
+    const auto target = ui::place_widget(preferences_.appearance, snapshot.bounds, snapshot.occupied,
+                                         static_cast<float>(snapshot.dpi / 96.0));
+    if (target.empty())
+        return Placement::NoSpace;
+    if (!widget.window) {
+        const auto previous = SetThreadDpiAwarenessContext(GetWindowDpiAwarenessContext(snapshot.taskbar));
+        widget.window = CreateWindowExW(WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, widget_class,
+                                        L"UsageTracker taskbar widget", WS_CHILD, 0, 0, target.width,
+                                        target.height, snapshot.taskbar, nullptr, GetModuleHandleW(nullptr), this);
+        SetThreadDpiAwarenessContext(previous);
+        widget.taskbar = snapshot.taskbar;
+        // Per-pixel alpha is supplied by paint_widget. Do not call
+        // SetLayeredWindowAttributes: it disables UpdateLayeredWindow.
+    }
+    const bool unchanged = widget.window && IsWindowVisible(widget.window) && target == widget.bounds;
+    if (!widget.window ||
+        !(unchanged || SetWindowPos(widget.window, HWND_TOP, target.x - snapshot.bounds.x,
+                                    target.y - snapshot.bounds.y, target.width, target.height,
+                                    SWP_NOACTIVATE | SWP_SHOWWINDOW)))
+        return Placement::Failed;
+    const bool anchor = &active() == &widget;
+    widget.bounds = target;
+    if (!unchanged) {
+        // A pinned preview follows the widget it hangs from; a pointer card closes.
+        if (anchor) {
+            if (hover_pinned_)
+                show_hover();
+            else
+                hide_hover();
+        }
+        InvalidateRect(widget.window, nullptr, FALSE);
+    }
+    return Placement::Shown;
+}
+
+// One widget per other monitor's taskbar while the preference is on. A widget
+// whose taskbar went away (a monitor unplugged, Explorer restarted) is
+// destroyed; one without room or a fresh layout just hides.
+void App::sync_secondary(const std::vector<Snapshot>& snapshots) {
+    const bool wanted = preferences_.appearance.all_taskbars;
+    for (auto& widget : secondary_) {
+        const bool present = std::any_of(snapshots.begin(), snapshots.end(), [&](const Snapshot& snapshot) {
+            return snapshot.taskbar == widget.taskbar;
+        });
+        const bool healthy = widget.window && IsWindow(widget.window) && GetParent(widget.window) == widget.taskbar;
+        if (wanted && present && healthy)
+            continue;
+        if (widget.window && widget.window == active_widget_)
+            hide_hover(true);
+        if (widget.window && IsWindow(widget.window))
+            DestroyWindow(widget.window);
+        widget.window = nullptr;
+    }
+    secondary_.erase(std::remove_if(secondary_.begin(), secondary_.end(),
+                                    [](const TaskbarWidget& widget) { return !widget.window; }),
+                     secondary_.end());
+    if (!wanted)
+        return;
+    const auto now = std::chrono::steady_clock::now();
+    for (const auto& snapshot : snapshots) {
+        auto found = std::find_if(secondary_.begin(), secondary_.end(),
+                                  [&](const TaskbarWidget& widget) { return widget.taskbar == snapshot.taskbar; });
+        const bool fresh = snapshot.error.empty() && now - snapshot.captured <= std::chrono::seconds(5);
+        if (found == secondary_.end()) {
+            if (!fresh)
+                continue;
+            secondary_.push_back({snapshot.taskbar, nullptr, {}});
+            found = secondary_.end() - 1;
+        }
+        if (!fresh || place(*found, snapshot) != Placement::Shown) {
+            if (found->window == active_widget_ && found->window)
+                hide_hover(true);
+            if (found->window)
+                ShowWindow(found->window, SW_HIDE);
+            found->bounds = {};
+            // A widget that was never created has nothing to keep.
+            if (!found->window)
+                secondary_.erase(found);
+        }
+    }
 }
 
 void App::hide_widget() {
     hide_hover(true);
-    if (widget_)
-        ShowWindow(widget_, SW_HIDE);
-    widget_bounds_ = {};
+    if (primary_.window)
+        ShowWindow(primary_.window, SW_HIDE);
+    primary_.bounds = {};
 }
 
 void App::tick() {
@@ -269,14 +380,15 @@ void App::tick() {
         render_details(details_pointer_);
     if ((hover_light_changed || hover_accent_changed) && IsWindowVisible(hover_))
         show_hover();
-    if (widget_view_.set_system_accent(os_accent) && widget_)
-        InvalidateRect(widget_, nullptr, FALSE);
-    if (widget_view_.set_system_light(system_light_theme()) && widget_)
-        InvalidateRect(widget_, nullptr, FALSE);
-    const auto snapshot = reader_.latest();
+    if (widget_view_.set_system_accent(os_accent))
+        invalidate_widgets();
+    if (widget_view_.set_system_light(system_light_theme()))
+        invalidate_widgets();
+    const auto taskbars = reader_.latest();
+    const auto& snapshot = taskbars.primary;
     const auto now = std::chrono::steady_clock::now();
     const auto current = FindWindowW(L"Shell_TrayWnd", nullptr);
-    if (widget_ && (!IsWindow(widget_) || GetParent(widget_) != current))
+    if (primary_.window && (!IsWindow(primary_.window) || GetParent(primary_.window) != current))
         reset_widget();
     if (!snapshot.error.empty() || snapshot.taskbar != current || !current) {
         hide_widget();
@@ -285,42 +397,22 @@ void App::tick() {
         hide_widget();
         set_status(L"Taskbar layout is stale. Waiting for Explorer.");
     } else {
-        const double scale = snapshot.dpi / 96.0;
-        const auto target = ui::place_widget(preferences_.appearance, snapshot.bounds, snapshot.occupied,
-                                             static_cast<float>(scale));
-        if (target.empty()) {
+        switch (place(primary_, snapshot)) {
+        case Placement::Shown:
+            set_status(L"Embedded in the primary taskbar");
+            break;
+        case Placement::NoSpace:
             hide_widget();
             set_status(L"No free taskbar space. Use the tray icon.");
-        } else {
-            if (!widget_) {
-                const auto previous = SetThreadDpiAwarenessContext(GetWindowDpiAwarenessContext(current));
-                widget_ = CreateWindowExW(WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, widget_class,
-                                          L"UsageTracker taskbar widget", WS_CHILD, 0, 0, target.width,
-                                          target.height, current, nullptr, GetModuleHandleW(nullptr), this);
-                SetThreadDpiAwarenessContext(previous);
-                // Per-pixel alpha is supplied by paint_widget. Do not call
-                // SetLayeredWindowAttributes: it disables UpdateLayeredWindow.
-            }
-            const bool unchanged = widget_ && IsWindowVisible(widget_) && target == widget_bounds_;
-            if (widget_ && (unchanged || SetWindowPos(widget_, HWND_TOP, target.x - snapshot.bounds.x,
-                                                      target.y - snapshot.bounds.y, target.width,
-                                                      target.height, SWP_NOACTIVATE | SWP_SHOWWINDOW))) {
-                widget_bounds_ = target;
-                if (!unchanged) {
-                    // A pinned preview follows the widget; a pointer card closes.
-                    if (hover_pinned_)
-                        show_hover();
-                    else
-                        hide_hover();
-                    InvalidateRect(widget_, nullptr, FALSE);
-                }
-                set_status(L"Embedded in the primary taskbar");
-            } else {
-                hide_widget();
-                set_status(L"Could not embed the widget; retrying.");
-            }
+            break;
+        case Placement::Failed:
+            hide_widget();
+            set_status(L"Could not embed the widget; retrying.");
+            break;
         }
     }
+    reader_.set_secondary(preferences_.appearance.all_taskbars);
+    sync_secondary(taskbars.secondary);
     if (smoke_ && now - started_ >= std::chrono::seconds(8))
         finish_smoke_test();
     if (live_test_ && now - started_ >= std::chrono::seconds(8) &&
@@ -344,35 +436,109 @@ void App::paint_widget(HWND window) {
             widget_view_.invalidate_measurements();
             widget_scale_ = scale;
         }
+        // One view draws every monitor's widget; only the one under the pointer
+        // shows the hover highlight.
+        widget_view_.set_hovered(hovered_ && window == active().window);
         const auto frame = widget_view_.frame(usage_, {}, bounds.right / scale, bounds.bottom / scale);
-        const auto pixels = renderer_.render(frame.commands, bounds.right, bounds.bottom, scale, true);
-        HDC dc = GetDC(nullptr);
-        HDC buffer = CreateCompatibleDC(dc);
-        BITMAPINFO info{};
-        info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-        info.bmiHeader.biWidth = pixels.width;
-        info.bmiHeader.biHeight = -pixels.height;
-        info.bmiHeader.biPlanes = 1;
-        info.bmiHeader.biBitCount = 32;
-        void* bits{};
-        HBITMAP bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
-        if (bitmap && buffer) {
-            auto old = SelectObject(buffer, bitmap);
-            std::memcpy(bits, pixels.data.data(), pixels.data.size() * sizeof(std::uint32_t));
-            POINT source{};
-            SIZE size{pixels.width, pixels.height};
-            BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
-            UpdateLayeredWindow(window, dc, nullptr, &size, buffer, &source, 0, &blend, ULW_ALPHA);
-            SelectObject(buffer, old);
-        }
-        if (bitmap)
-            DeleteObject(bitmap);
-        if (buffer)
-            DeleteDC(buffer);
-        ReleaseDC(nullptr, dc);
+        present_layered(window, renderer_.render(frame.commands, bounds.right, bounds.bottom, scale, true));
         ++widget_frames_;
     }
     EndPaint(window, &paint);
+}
+
+void App::present_layered(HWND window, const ui::Pixels& pixels) {
+    HDC dc = GetDC(nullptr);
+    HDC buffer = CreateCompatibleDC(dc);
+    BITMAPINFO info{};
+    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = pixels.width;
+    info.bmiHeader.biHeight = -pixels.height;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    void* bits{};
+    HBITMAP bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (bitmap && buffer) {
+        auto old = SelectObject(buffer, bitmap);
+        std::memcpy(bits, pixels.data.data(), pixels.data.size() * sizeof(std::uint32_t));
+        POINT source{};
+        SIZE size{pixels.width, pixels.height};
+        BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+        UpdateLayeredWindow(window, dc, nullptr, &size, buffer, &source, 0, &blend, ULW_ALPHA);
+        SelectObject(buffer, old);
+    }
+    if (bitmap)
+        DeleteObject(bitmap);
+    if (buffer)
+        DeleteDC(buffer);
+    ReleaseDC(nullptr, dc);
+}
+
+LRESULT CALLBACK App::confetti_proc(HWND window, UINT message, WPARAM w, LPARAM l) {
+    instance(window, message, l);
+    if (message == WM_NCHITTEST)
+        return HTTRANSPARENT;
+    if (message == WM_MOUSEACTIVATE)
+        return MA_NOACTIVATE;
+    return DefWindowProcW(window, message, w, l);
+}
+
+// Covers the widget and the space above and beside it, clipped to its monitor,
+// and launches the pieces from the widget's middle. A burst during a burst
+// adds to it in the same overlay.
+void App::celebrate() {
+    const auto& widget = active();
+    if (!animations_allowed_ || !client_animations_enabled() || !widget.window || !IsWindowVisible(widget.window) ||
+        widget.bounds.empty())
+        return;
+    const UINT dpi = GetDpiForWindow(widget.window);
+    const float scale = dpi ? dpi / 96.f : 1.f;
+    if (!confetti_window_) {
+        confetti_window_ =
+            CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+                            confetti_class, L"UsageTracker confetti", WS_POPUP, 0, 0, 0, 0, controller_, nullptr,
+                            GetModuleHandleW(nullptr), this);
+        if (!confetti_window_)
+            return;
+    }
+    RECT overlay{};
+    if (confetti_.done()) {
+        RECT anchor{widget.bounds.x, widget.bounds.y, widget.bounds.right(), widget.bounds.bottom()};
+        MONITORINFO monitor{sizeof(monitor)};
+        GetMonitorInfoW(MonitorFromRect(&anchor, MONITOR_DEFAULTTONEAREST), &monitor);
+        const auto spread = static_cast<LONG>(std::lround(confetti_spread * scale));
+        const auto rise = static_cast<LONG>(std::lround(confetti_rise * scale));
+        overlay = {std::max(monitor.rcMonitor.left, anchor.left - spread),
+                   std::max(monitor.rcMonitor.top, anchor.top - rise),
+                   std::min(monitor.rcMonitor.right, anchor.right + spread),
+                   std::min(monitor.rcMonitor.bottom, anchor.bottom)};
+        SetWindowPos(confetti_window_, HWND_TOPMOST, overlay.left, overlay.top, overlay.right - overlay.left,
+                     overlay.bottom - overlay.top, SWP_NOACTIVATE);
+    } else
+        GetWindowRect(confetti_window_, &overlay);
+    confetti_.burst((widget.bounds.x - overlay.left) / scale, widget.bounds.width / scale,
+                    (widget.bounds.y + widget.bounds.height / 2 - overlay.top) / scale, confetti_pieces);
+    confetti_frame_ = std::chrono::steady_clock::now();
+    animate_confetti();
+    ShowWindow(confetti_window_, SW_SHOWNOACTIVATE);
+    frames_->start();
+}
+
+bool App::animate_confetti() {
+    const auto now = std::chrono::steady_clock::now();
+    confetti_.step(std::chrono::duration<float>(now - confetti_frame_).count());
+    confetti_frame_ = now;
+    if (confetti_.done()) {
+        ShowWindow(confetti_window_, SW_HIDE);
+        return false;
+    }
+    RECT bounds{};
+    GetClientRect(confetti_window_, &bounds);
+    if (bounds.right <= 0 || bounds.bottom <= 0)
+        return true;
+    const UINT dpi = GetDpiForWindow(confetti_window_);
+    present_layered(confetti_window_,
+                    renderer_.render_confetti(confetti_, bounds.right, bounds.bottom, dpi ? dpi / 96.f : 1.f));
+    return true;
 }
 
 } // namespace usage::windows

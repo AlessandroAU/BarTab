@@ -14,7 +14,8 @@ Clay_Dimensions widget_size(const Appearance& appearance);
 // The widget at its preferred width, or narrowed down to the minimum width when a
 // free taskbar gap is tighter; empty when nothing fits.
 Rect place_widget(const Appearance& appearance, Rect panel, const std::vector<Rect>& occupied, float scale);
-Clay_Dimensions hover_size(const Usage& data, int text_percent);
+// `text_scale` is the hover card's effective text scale, Appearance::hover_text_scale().
+Clay_Dimensions hover_size(const Usage& data, int text_scale);
 
 enum class Surface { Widget, Details, Hover, Settings };
 // The settings panel's sidebar pages, in sidebar order.
@@ -153,9 +154,10 @@ class View {
     Color system_accent_{0, 120, 212};
     bool light_theme() const;
     // The hover card scales with its own preference; the taskbar uses the general one.
+    // The effective scale, which the layouts are written against.
     int surface_text_percent() const {
-        return surface_ == Surface::Hover ? preferences_.appearance.hover_text_percent
-                                          : preferences_.appearance.text_percent;
+        return surface_ == Surface::Hover ? preferences_.appearance.hover_text_scale()
+                                          : preferences_.appearance.taskbar_text_scale();
     }
     Clay_Color text_color(Clay_Color tint) const;
     Preferences preferences_;
@@ -186,7 +188,9 @@ class View {
                        std::int64_t now);
     void live_usage(const char* provider, const AccountUsage& account, Frame& result,
                     ClayWidgets_Input input);
-    void text(const char* value, uint16_t size, Clay_Color tint, int text_percent = 0);
+    // `word` marks a mostly lowercase label, which the taskbar centres by its
+    // lowercase letters rather than its digits and capitals.
+    void text(const char* value, uint16_t size, Clay_Color tint, int text_percent = 0, bool word = false);
     void compact_bar(const char* id, const char* label, int value, std::string_view percent,
                      int text_percent = 0);
     // Space between a taskbar label and its bar, and between the bar and its
@@ -204,16 +208,32 @@ class View {
         return width * 100 < 208 * surface_text_percent();
     }
     float text_width(const char* value, uint16_t size, int text_percent = 0);
+    // A slot for one of two stacked taskbar rows: a third of the widget's height,
+    // so the pair centres on one and two thirds of it. Text too tall for that
+    // keeps 0.8 em, about as close as capitals and descenders get without
+    // touching. The slot runs left to right because Clay centres an
+    // overflowing child only across that axis.
+    Clay_ElementDeclaration thirds_slot(uint16_t size, int text_percent = 0) const;
+    // Widening for the parts before and after a row's bars, `leading` and
+    // `trailing` wide, that puts the bars between the thirds of the widget's
+    // content width. It only comes out of bars longer than a third, so when a
+    // part is too wide for its third the bars keep a third and sit as near the
+    // thirds as they can.
+    struct ThirdsPadding {
+        float lead{}, trail{};
+    };
+    ThirdsPadding thirds_padding(float leading, float trailing) const;
     // Fixed label and percentage column widths so stacked taskbar rows share one
     // bar start and end; zero lets each row size its own text.
     struct WidgetColumns {
         float label{}, percent{}, reset{};
     };
     // Optional fixed-width wrapper so stacked rows keep their columns flush.
-    void column_text(float width, const char* value, uint16_t size, Clay_Color tint, uint16_t left_padding = 0);
+    void column_text(float width, const char* value, uint16_t size, Clay_Color tint, uint16_t left_padding = 0,
+                     bool word = false);
     WidgetColumns widget_columns_;
     void codex_only_split(const AccountUsage& account, const Allowance& session, const Allowance& weekly);
-    float frame_width_{};
+    float frame_width_{}, frame_height_{};
     void claude_only(const AccountUsage& account, const Allowance& weekly, const Allowance& fable);
     void taskbar_allowance(const char* id, const char* name, const Allowance& allowance, bool stale,
                            bool show_reset = true, bool date_only = false);

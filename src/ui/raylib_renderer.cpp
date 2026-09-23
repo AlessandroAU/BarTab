@@ -4,6 +4,7 @@
 #include <fstream>
 #include <map>
 #include <iterator>
+#include <cmath>
 #ifdef _MSC_VER
 #pragma warning(push, 0)
 #endif
@@ -19,7 +20,7 @@ namespace usage::ui {
 struct Renderer::Impl {
     FontCache fonts;
     std::map<uint16_t, std::vector<unsigned char>> font_data;
-    RenderTexture2D widget_texture{}, details_texture{};
+    RenderTexture2D widget_texture{}, details_texture{}, confetti_texture{};
     Impl() {
         SetTraceLogLevel(LOG_WARNING);
         SetConfigFlags(FLAG_WINDOW_HIDDEN);
@@ -36,6 +37,8 @@ struct Renderer::Impl {
             UnloadRenderTexture(widget_texture);
         if (details_texture.id)
             UnloadRenderTexture(details_texture);
+        if (confetti_texture.id)
+            UnloadRenderTexture(confetti_texture);
         FontCache_Unload(fonts);
         ClayWidgets_UnloadShapes();
         CloseWindow();
@@ -70,17 +73,18 @@ Clay_Dimensions Renderer::measure_callback(Clay_StringSlice text, Clay_TextEleme
                                            void* user) {
     return static_cast<Renderer*>(user)->measure(text, config);
 }
-Pixels Renderer::render(Clay_RenderCommandArray commands, int width, int height, float scale,
-                        bool hit_background) {
-    auto& target = hit_background ? impl_->widget_texture : impl_->details_texture;
-    if (!target.id || target.texture.width != width || target.texture.height != height) {
-        if (target.id)
-            UnloadRenderTexture(target);
-        target = LoadRenderTexture(width, height);
-        if (!target.id)
-            throw std::runtime_error("Could not allocate UI render texture");
-    }
-    impl_->fonts.dpiScale = scale;
+namespace {
+void fit(RenderTexture2D& target, int width, int height) {
+    if (target.id && target.texture.width == width && target.texture.height == height)
+        return;
+    if (target.id)
+        UnloadRenderTexture(target);
+    target = LoadRenderTexture(width, height);
+    if (!target.id)
+        throw std::runtime_error("Could not allocate UI render texture");
+}
+// Clears the target and sets up premultiplied drawing in DIPs.
+void begin(RenderTexture2D& target, float scale) {
     BeginTextureMode(target);
     ClearBackground(::Color{0, 0, 0, 0});
     // Accumulate alpha correctly; RGB output is already premultiplied on black.
@@ -89,7 +93,8 @@ Pixels Renderer::render(Clay_RenderCommandArray commands, int width, int height,
     BeginBlendMode(BLEND_CUSTOM_SEPARATE);
     rlPushMatrix();
     rlScalef(scale, scale, 1);
-    RenderClayCommands(commands, impl_->fonts, true);
+}
+Pixels finish(RenderTexture2D& target, bool hit_background) {
     rlPopMatrix();
     EndBlendMode();
     EndTextureMode();
@@ -98,6 +103,7 @@ Pixels Renderer::render(Clay_RenderCommandArray commands, int width, int height,
         throw std::runtime_error("Could not read UI render texture");
     ImageFlipVertical(&image);
     ImageFormat(&image, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+    const int width = target.texture.width, height = target.texture.height;
     Pixels result{width, height, {}};
     result.data.resize(static_cast<std::size_t>(width) * height);
     const auto* rgba = static_cast<const unsigned char*>(image.data);
@@ -110,6 +116,28 @@ Pixels Renderer::render(Clay_RenderCommandArray commands, int width, int height,
     }
     UnloadImage(image);
     return result;
+}
+} // namespace
+Pixels Renderer::render(Clay_RenderCommandArray commands, int width, int height, float scale,
+                        bool hit_background) {
+    auto& target = hit_background ? impl_->widget_texture : impl_->details_texture;
+    fit(target, width, height);
+    impl_->fonts.dpiScale = scale;
+    begin(target, scale);
+    RenderClayCommands(commands, impl_->fonts, true);
+    return finish(target, hit_background);
+}
+Pixels Renderer::render_confetti(const Confetti& confetti, int width, int height, float scale) {
+    auto& target = impl_->confetti_texture;
+    fit(target, width, height);
+    begin(target, scale);
+    for (const auto& piece : confetti.pieces()) {
+        const float w = piece.visible_width();
+        const auto alpha = static_cast<unsigned char>(std::lround(255.f * piece.opacity()));
+        DrawRectanglePro({piece.x, piece.y, w, piece.height}, {w / 2, piece.height / 2}, piece.angle,
+                         ::Color{piece.color.r, piece.color.g, piece.color.b, alpha});
+    }
+    return finish(target, false);
 }
 bool Renderer::save_png(const Pixels& pixels, const std::filesystem::path& path, std::uint32_t background) {
     if (pixels.width <= 0 || pixels.height <= 0)

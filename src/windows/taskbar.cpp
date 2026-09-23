@@ -17,9 +17,11 @@ Rect window_rect(HWND window) {
 }
 
 namespace {
-Snapshot read_snapshot(IUIAutomation* automation) {
+// The primary taskbar always lists buttons once its layout is ready, so an
+// empty walk means "not yet"; another monitor's may show none at all.
+Snapshot read_snapshot(IUIAutomation* automation, HWND taskbar, bool buttons_expected) {
     Snapshot result;
-    result.taskbar = FindWindowW(L"Shell_TrayWnd", nullptr);
+    result.taskbar = taskbar;
     result.bounds = window_rect(result.taskbar);
     if (!result.taskbar || result.bounds.empty())
         return result;
@@ -67,7 +69,7 @@ Snapshot read_snapshot(IUIAutomation* automation) {
         if (process != GetCurrentProcessId() && IsWindowVisible(other) && !rect.empty())
             result.occupied.push_back(rect);
     }
-    if (!result.occupied.empty())
+    if (!result.occupied.empty() || !buttons_expected)
         result.error.clear();
     return result;
 }
@@ -77,7 +79,8 @@ struct TaskbarReader::State {
     std::mutex mutex;
     std::condition_variable wake;
     bool stop{};
-    Snapshot snapshot;
+    bool secondary{};
+    Taskbars snapshot;
 };
 TaskbarReader::TaskbarReader() : state_(std::make_shared<State>()) {
     // Detached with shared ownership: a blocked third-party UIA provider must not
@@ -94,15 +97,28 @@ TaskbarReader::TaskbarReader() : state_(std::make_shared<State>()) {
                     if (state->stop)
                         break;
                 }
-                Snapshot snapshot;
+                bool secondary{};
+                {
+                    std::lock_guard<std::mutex> lock(state->mutex);
+                    secondary = state->secondary;
+                }
+                Taskbars snapshot;
                 if (!automation)
                     CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER,
                                      IID_PPV_ARGS(&automation));
-                if (automation)
-                    snapshot = read_snapshot(automation.Get());
-                else
-                    snapshot.error = L"UI Automation is unavailable; retrying.";
-                snapshot.captured = std::chrono::steady_clock::now();
+                if (automation) {
+                    snapshot.primary = read_snapshot(automation.Get(), FindWindowW(L"Shell_TrayWnd", nullptr), true);
+                    // Windows gives every other monitor's taskbar this class.
+                    for (HWND other = nullptr;
+                         secondary && (other = FindWindowExW(nullptr, other, L"Shell_SecondaryTrayWnd", nullptr));)
+                        if (IsWindowVisible(other))
+                            snapshot.secondary.push_back(read_snapshot(automation.Get(), other, false));
+                } else
+                    snapshot.primary.error = L"UI Automation is unavailable; retrying.";
+                const auto now = std::chrono::steady_clock::now();
+                snapshot.primary.captured = now;
+                for (auto& other : snapshot.secondary)
+                    other.captured = now;
                 std::unique_lock<std::mutex> lock(state->mutex);
                 state->snapshot = std::move(snapshot);
                 if (state->wake.wait_for(lock, std::chrono::seconds(1), [&] { return state->stop; }))
@@ -119,8 +135,12 @@ TaskbarReader::~TaskbarReader() {
     }
     state_->wake.notify_all();
 }
-Snapshot TaskbarReader::latest() const {
+Taskbars TaskbarReader::latest() const {
     std::lock_guard<std::mutex> lock(state_->mutex);
     return state_->snapshot;
+}
+void TaskbarReader::set_secondary(bool value) {
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    state_->secondary = value;
 }
 } // namespace usage::windows

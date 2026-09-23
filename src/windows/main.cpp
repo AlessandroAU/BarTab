@@ -37,7 +37,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         App app(smoke, live_test, mock);
         std::unique_ptr<MockPanel> panel;
         if (mock) {
-            panel = std::make_unique<MockPanel>(mock, [&app] { app.mock_changed(); });
+            panel = std::make_unique<MockPanel>(mock, [&app] { app.mock_changed(); }, [&app] { app.celebrate(); });
             app.set_mock_panel([&panel] { panel->show(); });
             panel->show();
         }

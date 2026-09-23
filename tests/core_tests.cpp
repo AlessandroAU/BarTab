@@ -85,8 +85,12 @@ void placement_preference_tests() {
 }
 void preference_tests() {
     Preferences settings;
-    require(settings.appearance.text_percent == 150 && settings.appearance.hover_text_percent == 150,
-            "Default taskbar and hover text sizes are 150 percent");
+    require(settings.appearance.text_percent == 100 && settings.appearance.hover_text_percent == 100,
+            "Default taskbar and hover text sizes are 100 percent");
+    require(settings.appearance.taskbar_text_scale() == 150 && settings.appearance.hover_text_scale() == 130,
+            "100 percent draws the taskbar at 1.5x and the hover card at 1.3x");
+    require(settings.appearance.bold_taskbar && settings.appearance.bold_hover && !settings.appearance.bold_settings,
+            "Taskbar and hover text default to bold, settings to regular");
     settings.appearance.text_percent = 400;
     settings.appearance.hover_text_percent = 10;
     settings.appearance.hover_opacity = -1;
@@ -94,7 +98,7 @@ void preference_tests() {
     settings.codex_interval = 1;
     settings.claude_interval = 10000;
     settings.normalize();
-    require(settings.appearance.text_percent == 300 && settings.appearance.hover_text_percent == 100,
+    require(settings.appearance.text_percent == 200 && settings.appearance.hover_text_percent == 65,
             "Appearance values are bounded");
     require(settings.appearance.hover_opacity == 50 && settings.appearance.widget_width == 100,
             "Visibility and minimum width are protected");
@@ -119,15 +123,46 @@ void usage_tests() {
         require(bar_color(percent) == expected, "Warning thresholds");
     }
 }
+void reset_tests() {
+    const std::int64_t now = 1'800'000'000;
+    AccountUsage before;
+    before.updated = 1;
+    before.windows = {{"5 hour", 20, now + 600}, {"Weekly", 60, now + 86400}};
+    auto after = before;
+    require(reset_windows(before, after, now).empty(), "An unchanged reading is no reset");
+    after.windows[0].remaining = 35;
+    after.windows[0].resets_at += 40;
+    require(reset_windows(before, after, now).empty(), "Growth before the reset time is no reset");
+    require(reset_windows(before, after, now + 600) == std::vector<std::string>{"5 hour"},
+            "Growth once the reset time passes is a reset");
+    after.windows[0] = {"5 hour", 100, now + 5 * 3600};
+    require(reset_windows(before, after, now) == std::vector<std::string>{"5 hour"},
+            "A reset time jumping ahead with the allowance back is an early reset");
+    after.windows[1].remaining = 100;
+    after.windows[1].resets_at = now + 7 * 86400;
+    require(reset_windows(before, after, now).size() == 2, "Every window that reset is reported");
+    auto first = before;
+    first.updated = 0;
+    require(reset_windows(first, after, now).empty(), "The first reading never celebrates");
+    auto failed = after;
+    failed.error = "login";
+    require(reset_windows(before, failed, now).empty() && reset_windows(failed, after, now).empty(),
+            "Readings either side of an error never celebrate");
+    after = before;
+    after.windows[0].remaining = 10;
+    after.windows[0].resets_at = now + 5 * 3600;
+    require(reset_windows(before, after, now + 600).empty(), "A shrinking allowance is no reset");
+}
 } // namespace
 int main() {
     try {
         placement_tests();
         placement_preference_tests();
         usage_tests();
+        reset_tests();
         preference_tests();
-        std::cout << "PASS: placement, position preferences, collision invariants, scaling, usage limits and "
-                     "warning thresholds.\n";
+        std::cout << "PASS: placement, position preferences, collision invariants, scaling, usage limits, "
+                     "reset detection and warning thresholds.\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';

@@ -1,5 +1,6 @@
 #pragma once
 #include "ui/views.hpp"
+#include "ui/confetti.hpp"
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -25,6 +26,9 @@ class Renderer {
     bool load_font_data(uint16_t id, std::vector<unsigned char> bytes);
     bool load_font(uint16_t id, const std::filesystem::path& path);
     Pixels render(Clay_RenderCommandArray, int width, int height, float scale, bool hit_background);
+    // Draws every piece as a rotated rectangle; piece positions are DIPs
+    // inside the target.
+    Pixels render_confetti(const Confetti& confetti, int width, int height, float scale);
     // Composites the premultiplied result over an opaque 0xRRGGBB backdrop and
     // writes a PNG. Used by the screenshot tool to regenerate the README images.
     static bool save_png(const Pixels& pixels, const std::filesystem::path& path, std::uint32_t background);

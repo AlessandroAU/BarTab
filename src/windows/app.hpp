@@ -1,5 +1,6 @@
 #pragma once
 #include "windows/taskbar.hpp"
+#include "windows/frame_clock.hpp"
 #include "core/settings_edit.hpp"
 #include "windows/providers.hpp"
 #include "ui/raylib_renderer.hpp"
@@ -9,9 +10,18 @@
 
 namespace usage::windows {
 inline constexpr UINT tray_message = WM_APP + 1;
+// One per display refresh from the FrameClock while anything animates.
+inline constexpr UINT frame_message = WM_APP + 2;
 inline constexpr wchar_t controller_class[] = L"UsageTracker.Controller.Cpp";
 inline constexpr wchar_t popup_class[] = L"UsageTracker.Popup.Cpp";
 inline constexpr wchar_t hover_class[] = L"UsageTracker.Hover.Cpp";
+inline constexpr wchar_t confetti_class[] = L"UsageTracker.Confetti.Cpp";
+
+// A widget embedded in one taskbar, with its screen bounds.
+struct TaskbarWidget {
+    HWND taskbar{}, window{};
+    Rect bounds{};
+};
 
 class App {
   public:
@@ -28,6 +38,8 @@ class App {
     void set_mock_panel(std::function<void()> open) {
         open_mock_panel_ = std::move(open);
     }
+    // Bursts confetti out of the widget, as when a usage window resets.
+    void celebrate();
 
   private:
     Usage usage_;
@@ -55,18 +67,29 @@ class App {
     ui::Pixels details_pixels_;
     ClayWidgets_Input details_pointer_{};
     // In the popup, input starts a short frame loop that keeps rendering with
-    // real deltaTime until the motion has settled. The hover card's opening is
-    // the only other motion, and it moves pixels rather than re-rendering.
+    // real deltaTime until the motion has settled. The hover card's opening
+    // moves pixels rather than re-rendering, and confetti has its own window.
+    // All three step on the frame clock, once per display refresh.
     const bool animations_allowed_;
+    std::unique_ptr<FrameClock> frames_;
+    int animations_logged_{-1};
     std::chrono::steady_clock::time_point details_rendered_{};
     std::chrono::steady_clock::time_point details_settle_until_{};
     unsigned widget_frames_{}, details_frames_{};
     float widget_scale_{}, details_scale_{};
     TaskbarReader reader_;
-    HWND controller_{}, widget_{}, popup_{}, hover_{};
+    // A click-through overlay above the widget that lives only for the burst.
+    ui::Confetti confetti_;
+    std::chrono::steady_clock::time_point confetti_frame_{};
+    HWND controller_{}, popup_{}, hover_{}, confetti_window_{};
+    // The primary taskbar's widget, and one per other monitor when the
+    // preference asks for it. The hover card, the settings window and confetti
+    // anchor to whichever the pointer last used.
+    TaskbarWidget primary_;
+    std::vector<TaskbarWidget> secondary_;
+    HWND active_widget_{};
     NOTIFYICONDATAW tray_{};
     UINT taskbar_created_{};
-    Rect widget_bounds_{};
     std::wstring status_{L"Waiting for the taskbar."};
     bool smoke_{};
     bool demo_mode_{};
@@ -95,17 +118,29 @@ class App {
     void hide_hover(bool force = false);
     void show_hover();
     void shape_hover();
-    void animate_hover();
+    // Each animate_* steps one frame and returns whether it is still moving.
+    bool animate_hover();
     void pin_hover();
     void unpin_hover();
     void avoid_hover(int& x, int& y, int width, int height, const RECT& work) const;
     static LRESULT CALLBACK popup_proc(HWND window, UINT message, WPARAM w, LPARAM l);
+    static LRESULT CALLBACK confetti_proc(HWND window, UINT message, WPARAM w, LPARAM l);
+    bool animate_confetti();
+    void frame();
+    // Hands per-pixel-alpha pixels to a layered window.
+    static void present_layered(HWND window, const ui::Pixels& pixels);
     void set_status(const std::wstring& value);
     void add_tray();
     void update_tooltip();
     void update_usage();
     void reset_widget();
     void hide_widget();
+    enum class Placement { Shown, NoSpace, Failed };
+    // Creates or moves one taskbar's widget for its latest snapshot.
+    Placement place(TaskbarWidget& widget, const Snapshot& snapshot);
+    void sync_secondary(const std::vector<Snapshot>& snapshots);
+    const TaskbarWidget& active() const;
+    void invalidate_widgets() const;
     void tick();
     void paint_widget(HWND window);
     float popup_scale() const;
@@ -113,7 +148,7 @@ class App {
     void render_details(ClayWidgets_Input input);
     void render_details_frame(ClayWidgets_Input input);
     void set_details_cursor() const;
-    void animate_details();
+    bool animate_details();
     void paint_details(HWND window);
     // `y` shifts the pixels down; the window clips whatever falls outside.
     static void paint_pixels(HWND window, const ui::Pixels& pixels, int y = 0);

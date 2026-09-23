@@ -69,7 +69,7 @@ else()
     target_compile_options(clay_widgets PRIVATE -w)
 endif()
 
-add_library(usage_ui STATIC src/ui/views.cpp)
+add_library(usage_ui STATIC src/ui/views.cpp src/ui/confetti.cpp)
 target_include_directories(usage_ui PUBLIC src)
 target_link_libraries(usage_ui PUBLIC usage_core clay_widgets)
 
@@ -174,6 +174,7 @@ if(WIN32)
         src/windows/discovery.cpp
         src/windows/startup.cpp
         src/windows/widget.cpp
+        src/windows/frame_clock.cpp
         src/windows/popup.cpp
         src/windows/smoke_test.cpp
         src/windows/taskbar.cpp

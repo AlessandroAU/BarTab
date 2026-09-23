@@ -2,7 +2,7 @@
 
 | Dependency | How it is included | Revision | License |
 | --- | --- | --- | --- |
-| [clay-widgets](https://github.com/AlessandroAU/clay-widgets) | Git submodule at `clay-widgets/` | `335a3e02a8719fd2fee1ecf50bcfbf7a01cf33dc` | MIT |
+| [clay-widgets](https://github.com/AlessandroAU/clay-widgets) | Git submodule at `clay-widgets/` | `16d981b388cb417dd7bb08ffc33923fd5c299671` | MIT |
 | [Clay](https://github.com/nicbarker/clay) | clay-widgets' submodule `subprojects/clay` | pinned by clay-widgets (`e6cc369`) | zlib |
 | [raylib](https://github.com/raysan5/raylib) | clay-widgets' submodule `subprojects/raylib`, bundled GLFW included | pinned by clay-widgets (`fc03d77`) | zlib; bundled licenses retained in source |
 | [FreeType](https://freetype.org) | clay-widgets' submodule `subprojects/freetype` | pinned by clay-widgets (`VER-2-14-3`) | FreeType License (FTL), chosen from its FTL/GPLv2 dual license |

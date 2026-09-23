@@ -15,6 +15,11 @@ struct Snapshot {
     std::wstring error{L"Waiting for taskbar layout."};
     std::chrono::steady_clock::time_point captured{};
 };
+// The primary taskbar, and each other monitor's when asked for.
+struct Taskbars {
+    Snapshot primary;
+    std::vector<Snapshot> secondary;
+};
 
 // The worker owns all COM objects. Only plain data crosses to the UI thread.
 class TaskbarReader {
@@ -23,7 +28,10 @@ class TaskbarReader {
     ~TaskbarReader();
     TaskbarReader(const TaskbarReader&) = delete;
     TaskbarReader& operator=(const TaskbarReader&) = delete;
-    Snapshot latest() const;
+    Taskbars latest() const;
+    // Whether to read the other monitors' taskbars too; each one costs a UI
+    // Automation walk per second, so only while a widget is wanted there.
+    void set_secondary(bool value);
 
   private:
     struct State;

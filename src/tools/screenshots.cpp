@@ -121,12 +121,40 @@ int main(int argc, char** argv) {
             return ok ? 0 : 1;
         }
 
+        // --taskbar: every taskbar layout at 1x, at the smallest and the default
+        // text size, for checking pixel alignment as it lands on a 100% display.
+        if (argc > 2 && std::string(argv[2]) == "--taskbar") {
+            for (const int percent : {preference_limits::text_percent.min, preferences.appearance.text_percent}) {
+                Preferences prefs = preferences;
+                prefs.appearance.text_percent = percent;
+                const auto tag = "-" + std::to_string(percent);
+                const auto size = ui::widget_size(prefs.appearance);
+                ok = shooter.shoot(("taskbar-both" + tag).c_str(), ui::Surface::Widget, data, prefs, size.width,
+                                   size.height, taskbar_backdrop, 1.f) && ok;
+                Usage codex_only = data;
+                codex_only.claude_enabled = false;
+                prefs.claude_enabled = false;
+                ok = shooter.shoot(("taskbar-codex" + tag).c_str(), ui::Surface::Widget, codex_only, prefs,
+                                   size.width, size.height, taskbar_backdrop, 1.f) && ok;
+                codex_only.codex.windows.erase(codex_only.codex.windows.begin());
+                ok = shooter.shoot(("taskbar-codex-weekly" + tag).c_str(), ui::Surface::Widget, codex_only, prefs,
+                                   size.width, size.height, taskbar_backdrop, 1.f) && ok;
+                Usage claude_only = data;
+                claude_only.codex_enabled = false;
+                prefs.claude_enabled = true;
+                prefs.codex_enabled = false;
+                ok = shooter.shoot(("taskbar-claude" + tag).c_str(), ui::Surface::Widget, claude_only, prefs,
+                                   size.width, size.height, taskbar_backdrop, 1.f) && ok;
+            }
+            return ok ? 0 : 1;
+        }
+
         // --sweep: every surface at 1x across text-gamma values, with default
         // and enlarged/bold text, for comparing curves side by side.
         if (argc > 2 && std::string(argv[2]) == "--sweep") {
             Preferences large = preferences;
-            large.appearance.text_percent = 160;
-            large.appearance.hover_text_percent = 130;
+            large.appearance.text_percent = 110;
+            large.appearance.hover_text_percent = 110;
             large.appearance.bold_taskbar = large.appearance.bold_hover = large.appearance.bold_settings = true;
             large.appearance.widget_width = 225;
             large.normalize();
@@ -134,7 +162,7 @@ int main(int argc, char** argv) {
                 const auto tag = std::to_string(static_cast<int>(std::lround(gamma * 10)));
                 for (const auto& [label, prefs] : {std::pair{"default", preferences}, std::pair{"large", large}}) {
                     const auto size = ui::widget_size(prefs.appearance);
-                    auto hover_size = ui::hover_size(data, prefs.appearance.hover_text_percent);
+                    auto hover_size = ui::hover_size(data, prefs.appearance.hover_text_scale());
                     hover_size.width = size.width;
                     ui::View layout(ui::Surface::Hover, ui::Renderer::measure_callback, &shooter.renderer());
                     layout.set_preferences(prefs);
@@ -186,7 +214,7 @@ int main(int argc, char** argv) {
         ok = shooter.shoot("taskbar-widget-codex-single", ui::Surface::Widget, codex_only,
                            codex_preferences, 208, widget_height, taskbar_backdrop) && ok;
 
-        auto hover = ui::hover_size(data, appearance.hover_text_percent);
+        auto hover = ui::hover_size(data, appearance.hover_text_scale());
         hover.width = widget.width;
         ui::View hover_layout(ui::Surface::Hover, ui::Renderer::measure_callback, &shooter.renderer());
         hover_layout.set_preferences(preferences);

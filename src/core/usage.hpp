@@ -47,6 +47,13 @@ struct AccountUsage {
     std::optional<int> available_resets;
 };
 
+// Labels of the windows that reset between two readings of one account: the
+// allowance grew back, and either its known reset time has passed or the next
+// one jumped well ahead (an early or earned reset). A first reading, or one
+// either side of an error, never counts.
+std::vector<std::string> reset_windows(const AccountUsage& before, const AccountUsage& after,
+                                       std::int64_t now);
+
 class Usage {
   public:
     Usage() {

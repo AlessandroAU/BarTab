@@ -8,16 +8,21 @@ struct AppearanceField {
     const wchar_t* key;
     const char* name;
     int Appearance::*member;
-    // Missing keys copy this already-loaded member instead of the compiled default.
-    int Appearance::*fallback{};
 };
 constexpr AppearanceField appearance_fields[] = {
-    {L"TextPercent", "TextPercent", &Appearance::text_percent},
-    {L"HoverTextPercent", "HoverTextPercent", &Appearance::hover_text_percent, &Appearance::text_percent},
+    {L"TextSize", "TextSize", &Appearance::text_percent},
+    {L"HoverTextSize", "HoverTextSize", &Appearance::hover_text_percent},
     {L"WidgetWidth", "WidgetWidth", &Appearance::widget_width},
     {L"HoverOpacity", "HoverOpacity", &Appearance::hover_opacity},
     {L"BarHeight", "BarHeight", &Appearance::bar_height},
     {L"Position", "Position", &Appearance::position}};
+// TextPercent and HoverTextPercent were absolute scales; the sizes that replace
+// them are relative to each surface's base, so 150 and 130 both become 100.
+// Files from before the hover size had only TextPercent, which both reuse.
+int rescaled(int old_percent, int base) {
+    const int step = preference_limits::text_percent.step;
+    return (old_percent * 100 / base + step / 2) / step * step;
+}
 } // namespace
 Preferences read_settings(const std::filesystem::path& path) {
     Preferences value;
@@ -30,18 +35,26 @@ Preferences read_settings(const std::filesystem::path& path) {
     auto read = [&](const wchar_t* section, const wchar_t* key, int fallback) {
         return static_cast<int>(GetPrivateProfileIntW(section, key, fallback, absolute.c_str()));
     };
+    const int old_text = read(L"Appearance", L"TextPercent", 0);
+    if (old_text > 0) {
+        value.appearance.text_percent = rescaled(old_text, taskbar_text_base);
+        value.appearance.hover_text_percent =
+            rescaled(read(L"Appearance", L"HoverTextPercent", old_text), hover_text_base);
+    }
     for (const auto& field : appearance_fields)
         value.appearance.*(field.member) =
-            read(L"Appearance", field.key, value.appearance.*(field.fallback ? field.fallback : field.member));
+            read(L"Appearance", field.key, value.appearance.*(field.member));
     value.appearance.show_resets = read(L"Appearance", L"ShowResets", value.appearance.show_resets) != 0;
     value.appearance.hover_enabled =
         read(L"Appearance", L"HoverEnabled", value.appearance.hover_enabled) != 0;
     value.appearance.twelve_hour_time = read(L"Appearance", L"TwelveHourTime", 0) != 0;
+    value.appearance.all_taskbars = read(L"Appearance", L"AllTaskbars", 0) != 0;
     // BoldText was one switch for every surface; it seeds each of its successors.
-    const int bold = read(L"Appearance", L"BoldText", 0);
-    value.appearance.bold_taskbar = read(L"Appearance", L"BoldTaskbar", bold) != 0;
-    value.appearance.bold_hover = read(L"Appearance", L"BoldHover", bold) != 0;
-    value.appearance.bold_settings = read(L"Appearance", L"BoldSettings", bold) != 0;
+    const int bold = read(L"Appearance", L"BoldText", -1);
+    auto& a = value.appearance;
+    a.bold_taskbar = read(L"Appearance", L"BoldTaskbar", bold < 0 ? a.bold_taskbar : bold) != 0;
+    a.bold_hover = read(L"Appearance", L"BoldHover", bold < 0 ? a.bold_hover : bold) != 0;
+    a.bold_settings = read(L"Appearance", L"BoldSettings", bold < 0 ? a.bold_settings : bold) != 0;
     value.codex_enabled = read(L"Providers", L"Codex", value.codex_enabled) != 0;
     value.claude_enabled = read(L"Providers", L"Claude", value.claude_enabled) != 0;
     value.codex_interval = read(L"Providers", L"CodexInterval", value.codex_interval);
@@ -69,6 +82,7 @@ bool write_settings(const std::filesystem::path& path, Preferences value) {
              << "\nBoldSettings=" << value.appearance.bold_settings
              << "\nTwelveHourTime=" << value.appearance.twelve_hour_time
              << "\nHoverEnabled=" << value.appearance.hover_enabled
+             << "\nAllTaskbars=" << value.appearance.all_taskbars
              << "\n[Providers]\nCodex=" << value.codex_enabled << "\nClaude=" << value.claude_enabled
              << "\nCodexInterval=" << value.codex_interval << "\nClaudeInterval=" << value.claude_interval
              << '\n';

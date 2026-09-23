@@ -9,7 +9,10 @@ namespace usage::windows {
 // mocked provider's state and allowances, applying every change immediately.
 class MockPanel {
   public:
-    MockPanel(std::shared_ptr<MockProviders> providers, std::function<void()> changed);
+    // `celebrate` plays the reset animation when a simulated reset would not
+    // trigger it on its own.
+    MockPanel(std::shared_ptr<MockProviders> providers, std::function<void()> changed,
+              std::function<void()> celebrate);
     ~MockPanel();
     MockPanel(const MockPanel&) = delete;
     MockPanel& operator=(const MockPanel&) = delete;
@@ -30,7 +33,7 @@ class MockPanel {
         AllowanceControls allowances[3];
     };
     std::shared_ptr<MockProviders> providers_;
-    std::function<void()> changed_;
+    std::function<void()> changed_, celebrate_;
     HWND window_{}, preset_{};
     HFONT font_{};
     UINT dpi_{96};
@@ -47,5 +50,7 @@ class MockPanel {
     MockScenario read_scenario() const;
     void update_labels();
     void apply(bool from_preset);
+    // Rolls every window of one provider over: nothing used, a full period to go.
+    void simulate_reset(int index);
 };
 } // namespace usage::windows

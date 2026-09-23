@@ -52,6 +52,20 @@ void Usage::set_session(int value) {
 void Usage::set_weekly(int value) {
     weekly_ = std::clamp(value, 0, 100);
 }
+std::vector<std::string> reset_windows(const AccountUsage& before, const AccountUsage& after,
+                                       std::int64_t now) {
+    // Refreshes nudge reset times by seconds; a real rollover moves them by hours.
+    constexpr std::int64_t jump = 30 * 60;
+    std::vector<std::string> result;
+    if (!before.updated || !before.error.empty() || !after.error.empty())
+        return result;
+    for (const auto& next : after.windows)
+        for (const auto& last : before.windows)
+            if (last.label == next.label && last.resets_at > 0 && next.remaining > last.remaining &&
+                (now >= last.resets_at || next.resets_at >= last.resets_at + jump))
+                result.push_back(next.label);
+    return result;
+}
 Color bar_color(int value) {
     return value <= 15 ? Color{248, 115, 123} : value <= 30 ? Color{246, 193, 97} : accent;
 }

@@ -246,6 +246,7 @@ void View::taskbar_settings(Frame& result) {
                                     preference_limits::widget_width, " px") || result.changed;
     result.changed = setting_slider("WidgetPosition", "Position", a.position, preference_limits::position,
                                     "% from left") || result.changed;
+    result.changed = setting_toggle("AllTaskbars", "Show on every monitor", a.all_taskbars) || result.changed;
     result.changed = setting_slider("BarHeight", "Bar thickness", a.bar_height, preference_limits::bar_height,
                                     " px") || result.changed;
     ClayWidgets_EndScrollPanel(widgets_.get(), CLAY_ID("TaskbarScroll"));
@@ -490,7 +491,7 @@ void View::set_text_percent(int value) {
 void View::set_hover_text_percent(int value) {
     preferences_.appearance.hover_text_percent = preference_limits::text_percent.clamp(value);
 }
-void View::text(const char* value, uint16_t size, Clay_Color tint, int text_percent) {
+void View::text(const char* value, uint16_t size, Clay_Color tint, int text_percent, bool word) {
     if (text_percent == 0)
         text_percent = surface_text_percent();
     Clay_TextElementConfig config{};
@@ -499,7 +500,22 @@ void View::text(const char* value, uint16_t size, Clay_Color tint, int text_perc
     config.fontId = font_id();
     config.textColor = text_color(tint);
     config.wrapMode = surface_ == Surface::Hover ? CLAY_TEXT_WRAP_WORDS : CLAY_TEXT_WRAP_NONE;
-    CLAY_TEXT(string(value), config);
+    if (surface_ != Surface::Widget) {
+        CLAY_TEXT(string(value), config);
+        return;
+    }
+    // A line box keeps room for descenders, so centring it leaves digits and
+    // capitals about 1/32 em low beside a bar (measured at the default 150%);
+    // padding a sixteenth of the size underneath lifts them onto the bar's
+    // centre line. A word reads as centred somewhere between its capitals and
+    // its lowercase letters, which sit another 1/10 em lower, so a word gets an
+    // eighth of the size: a quarter centred the lowercase and looked high.
+    Clay_ElementDeclaration lift{};
+    lift.layout.padding.bottom =
+        static_cast<uint16_t>(std::lround(config.fontSize / (word ? 8.f : 16.f)));
+    CLAY_AUTO_ID (lift) {
+        CLAY_TEXT(string(value), config);
+    }
 }
 View::View(Surface surface, ClayWidgets_MeasureTextFunction measure, void* measure_data)
     : surface_(surface), widgets_(std::make_unique<ClayWidgets_Context>()) {
@@ -561,6 +577,30 @@ float View::text_width(const char* value, uint16_t size, int text_percent) {
     const Clay_StringSlice sample{static_cast<int32_t>(std::strlen(value)), value, value};
     return std::ceil(widgets_->measureText(sample, &config, widgets_->measureTextUserData).width);
 }
+Clay_ElementDeclaration View::thirds_slot(uint16_t size, int text_percent) const {
+    if (text_percent == 0)
+        text_percent = surface_text_percent();
+    auto slot = column(0, 0);
+    slot.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    slot.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
+    slot.layout.sizing.height =
+        CLAY_SIZING_FIXED(std::max(frame_height_ / 3.f, std::ceil(size * text_percent / 100.f * 0.8f)));
+    return slot;
+}
+View::ThirdsPadding View::thirds_padding(float leading, float trailing) const {
+    // The taskbar root's side padding.
+    const float third = (frame_width_ - 2.f * widget_gap(6, 2)) / 3.f;
+    ThirdsPadding result{std::max(0.f, third - leading), std::max(0.f, third - trailing)};
+    const float spare = std::max(0.f, 2.f * third - leading - trailing);
+    const float wanted = result.lead + result.trail;
+    if (wanted > spare) {
+        result.lead *= spare / wanted;
+        result.trail *= spare / wanted;
+    }
+    result.lead = std::floor(result.lead);
+    result.trail = std::floor(result.trail);
+    return result;
+}
 void View::compact_bar(const char* name, const char* label, int value, std::string_view percent,
                        int text_percent) {
     if (text_percent == 0)
@@ -578,10 +618,10 @@ void View::compact_bar(const char* name, const char* label, int value, std::stri
             auto name_column = column(0, 0);
             name_column.layout.sizing.width = CLAY_SIZING_FIXED(label_width);
             CLAY_AUTO_ID (name_column) {
-                text(label, text_size, {172, 190, 210, 255}, text_percent);
+                text(label, text_size, {172, 190, 210, 255}, text_percent, true);
             }
         } else
-            text(label, text_size, {172, 190, 210, 255}, text_percent);
+            text(label, text_size, {172, 190, 210, 255}, text_percent, true);
         Clay_ElementDeclaration track{};
         track.layout.sizing.width = CLAY_SIZING_GROW(0);
         track.layout.sizing.height =
@@ -613,7 +653,7 @@ void View::compact_bar(const char* name, const char* label, int value, std::stri
     }
 }
 void View::codex_only_split(const AccountUsage& account, const Allowance& session, const Allowance& weekly) {
-    const int percent = std::min(preferences_.appearance.text_percent, 160);
+    const int percent = std::min(preferences_.appearance.taskbar_text_scale(), 160);
     const auto previous = widget_columns_;
     const auto title = account.error.empty() ? "Codex" : "Codex *";
     const auto first = std::to_string(session.remaining) + "%";
@@ -625,27 +665,40 @@ void View::codex_only_split(const AccountUsage& account, const Allowance& sessio
     const auto second_reset = hover_reset(weekly.resets_at, now);
     const float reset_width = std::max(text_width(first_reset.c_str(), 9, percent),
                                        text_width(second_reset.c_str(), 9, percent));
+    const float title_width = text_width(title, 10, percent);
+    // Keeps the provider name clear of the row labels beside the bars.
+    const float title_gap = static_cast<float>(bar_gap() + widget_gap(4, 2));
     const bool show_resets = preferences_.appearance.show_resets &&
-        frame_width_ >= 12 + text_width(title, 10, percent) + widget_columns_.label +
-                        widget_columns_.percent + reset_width + 24 + 5 * bar_gap();
-    auto root = column(0, bar_gap());
+        frame_width_ >= 12 + title_width + title_gap + widget_columns_.label + widget_columns_.percent +
+                        reset_width + 24 + 3 * bar_gap();
+    // The bars run from one third of the width to two: spare room goes between
+    // the name and the row labels, and after the trailing text.
+    const auto [lead, trail] = thirds_padding(title_width + title_gap + widget_columns_.label + bar_gap(),
+                                              bar_gap() + widget_columns_.percent +
+                                                  (show_resets ? bar_gap() + reset_width : 0.f));
+    if (!show_resets)
+        widget_columns_.percent += trail;
+    auto root = column(0, 0);
     root.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
     root.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
     CLAY (CLAY_ID("CodexSplit"), root) {
-        text(title, 10, provider_color("Codex"), percent);
-        auto rows = column(0, 2);
+        auto name = column(0, 0);
+        name.layout.sizing.width = CLAY_SIZING_FIXED(title_width + title_gap + lead);
+        CLAY (CLAY_ID("CodexSplitName"), name) {
+            text(title, 10, provider_color("Codex"), percent, true);
+        }
+        auto rows = column(0, 0);
         CLAY_AUTO_ID (rows) {
             for (int i = 0; i < 2; ++i) {
-                auto row = column(0, bar_gap());
-                row.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
-                row.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
+                auto row = thirds_slot(10, percent);
+                row.layout.childGap = bar_gap();
                 CLAY_AUTO_ID (row) {
                     compact_bar(i == 0 ? "Codex5h" : "CodexWeekly", i == 0 ? "5h" : "Week",
                                 i == 0 ? session.remaining : weekly.remaining,
                                 label(i == 0 ? first : second), percent);
                     if (show_resets) {
                         auto reset = column(0, 0);
-                        reset.layout.sizing.width = CLAY_SIZING_FIXED(reset_width);
+                        reset.layout.sizing.width = CLAY_SIZING_FIXED(reset_width + trail);
                         CLAY_AUTO_ID (reset) {
                             text(label(i == 0 ? first_reset : second_reset), 9,
                                  {166, 187, 208, 255}, percent);
@@ -664,58 +717,92 @@ void View::claude_only(const AccountUsage& account, const Allowance& weekly, con
     const auto previous = widget_columns_;
     widget_columns_ = {text_width(stale ? "General *" : "General", 10),
                        std::max(text_width(general_percent.c_str(), 10), text_width(fable_percent.c_str(), 10))};
+    const bool side_by_side = preferences_.appearance.taskbar_text_scale() > stacked_text_limit();
+    std::string first, second;
+    // Two reset lines must fit the fixed taskbar height at every text scale.
+    const auto reset_size = static_cast<uint16_t>(std::min(9.f, 1600.f / preferences_.appearance.taskbar_text_scale()));
+    float reset_width = 0;
+    if (preferences_.appearance.show_resets) {
+        const bool shared = weekly.resets_at > 0 && fable.resets_at > 0 &&
+                            reset_time(weekly.resets_at, true, true) == reset_time(fable.resets_at, true, true);
+        const bool narrow = narrow_widget();
+        first = reset_time(weekly.resets_at, narrow);
+        second = reset_time(fable.resets_at, narrow);
+        if (shared) {
+            first = reset_time(weekly.resets_at, true);
+            second = reset_time(weekly.resets_at).substr(6);
+            const auto other = reset_time(fable.resets_at).substr(6);
+            if (second != other)
+                second += "/" + other;
+        }
+        reset_width = std::max(text_width(first.c_str(), reset_size), text_width(second.c_str(), reset_size));
+    }
+    // Stacked bars run from one third of the width to two, like the other
+    // two-row layouts: spare room goes after the labels and after the resets.
+    float trail = 0;
+    if (!side_by_side) {
+        const auto padding = thirds_padding(widget_columns_.label + bar_gap(),
+                                            bar_gap() + widget_columns_.percent +
+                                                (reset_width > 0 ? bar_gap() + reset_width : 0.f));
+        widget_columns_.label += padding.lead;
+        trail = padding.trail;
+        if (reset_width <= 0)
+            widget_columns_.percent += trail;
+    }
     auto row = column(0, bar_gap());
     row.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
     row.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
     CLAY (CLAY_ID("ClaudeOnly"), row) {
-        auto bars = column(0, widget_gap(2));
-        if (preferences_.appearance.text_percent > stacked_text_limit()) {
+        auto bars = column(0, 0);
+        if (side_by_side) {
             bars.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
             bars.layout.childGap = widget_gap(12, 2);
         }
         CLAY (CLAY_ID("ClaudeOnlyBars"), bars) {
-            compact_bar("ClaudeGeneral", stale ? "General *" : "General", weekly.remaining,
-                        label(general_percent));
-            compact_bar("ClaudeFable", stale ? "Fable *" : "Fable", fable.remaining, label(fable_percent));
+            if (side_by_side) {
+                compact_bar("ClaudeGeneral", stale ? "General *" : "General", weekly.remaining,
+                            label(general_percent));
+                compact_bar("ClaudeFable", stale ? "Fable *" : "Fable", fable.remaining, label(fable_percent));
+            } else {
+                CLAY_AUTO_ID (thirds_slot(10)) {
+                    compact_bar("ClaudeGeneral", stale ? "General *" : "General", weekly.remaining,
+                                label(general_percent));
+                }
+                CLAY_AUTO_ID (thirds_slot(10)) {
+                    compact_bar("ClaudeFable", stale ? "Fable *" : "Fable", fable.remaining, label(fable_percent));
+                }
+            }
         }
         widget_columns_ = previous;
-        if (preferences_.appearance.show_resets) {
-            const bool shared =
-                weekly.resets_at > 0 && fable.resets_at > 0 &&
-                reset_time(weekly.resets_at, true, true) == reset_time(fable.resets_at, true, true);
-            const bool narrow = narrow_widget();
-            auto first = reset_time(weekly.resets_at, narrow);
-            auto second = reset_time(fable.resets_at, narrow);
-            if (shared) {
-                first = reset_time(weekly.resets_at, true);
-                second = reset_time(weekly.resets_at).substr(6);
-                const auto other = reset_time(fable.resets_at).substr(6);
-                if (second != other)
-                    second += "/" + other;
-            }
-            auto resets = column(0, 2);
-            resets.layout.sizing.width = CLAY_SIZING_FIT(0);
-            resets.layout.childAlignment.x = CLAY_ALIGN_X_RIGHT;
+        if (reset_width > 0) {
+            auto resets = column(0, 0);
+            resets.layout.sizing.width = CLAY_SIZING_FIXED(reset_width + trail);
             CLAY (CLAY_ID("ClaudeResetColumn"), resets) {
-                // Two reset lines must fit the fixed taskbar height at every text scale.
-                const auto size =
-                    static_cast<uint16_t>(std::min(9.f, 1600.f / preferences_.appearance.text_percent));
-                text(label(first), size, {166, 187, 208, 255});
-                text(label(second), size, {166, 187, 208, 255});
+                // Stacked, each reset shares its bar's slot so it reads along the
+                // same line; beside side-by-side bars the pair keeps to its own size.
+                auto slot = thirds_slot(side_by_side ? reset_size : 10);
+                if (side_by_side)
+                    slot.layout.childAlignment.x = CLAY_ALIGN_X_RIGHT;
+                for (const auto* line : {&first, &second}) {
+                    CLAY_AUTO_ID (slot) {
+                        text(label(*line), reset_size, {166, 187, 208, 255});
+                    }
+                }
             }
         }
     }
 }
-void View::column_text(float width, const char* value, uint16_t size, Clay_Color tint, uint16_t left_padding) {
+void View::column_text(float width, const char* value, uint16_t size, Clay_Color tint, uint16_t left_padding,
+                       bool word) {
     if (width <= 0 && left_padding == 0) {
-        text(value, size, tint);
+        text(value, size, tint, 0, word);
         return;
     }
     auto fixed = column(0, 0);
     fixed.layout.sizing.width = CLAY_SIZING_FIXED((width > 0 ? width : text_width(value, size)) + left_padding);
     fixed.layout.padding.left = left_padding;
     CLAY_AUTO_ID (fixed) {
-        text(value, size, tint);
+        text(value, size, tint, 0, word);
     }
 }
 // Reset dates for the paired Claude row: one date when both fall on the same
@@ -750,7 +837,7 @@ void View::claude_bars(const AccountUsage& account, const Allowance& weekly, con
     row.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
     CLAY (CLAY_ID("Claude"), row) {
         column_text(widget_columns_.label, account.error.empty() ? "Claude" : "Claude *", 10,
-                    {172, 190, 210, 255});
+                    {172, 190, 210, 255}, 0, true);
         // Both tracks share the row with a 10 pt label: each is one pixel thinner
         // than a full bar, capped so the pair and their gap never outgrow the label.
         const float row_text = static_cast<float>(std::lround(10 * surface_text_percent() / 100.f));
@@ -816,12 +903,13 @@ int View::widget_spacing_for(float width) const {
         spacing = std::clamp(static_cast<int>(std::lround(
                                  100.f * (width - preference_limits::widget_width.min) / range)),
                              0, 100);
-    if (a.text_percent > 160 && a.text_percent <= 180)
-        spacing = std::min(spacing, 100 - 5 * (a.text_percent - 160));
+    const int scale = a.taskbar_text_scale();
+    if (scale > 160 && scale <= 180)
+        spacing = std::min(spacing, 100 - 5 * (scale - 160));
     return spacing;
 }
-Clay_Dimensions hover_size(const Usage& data, int text_percent) {
-    const float scale = text_percent / 100.f;
+Clay_Dimensions hover_size(const Usage& data, int text_scale) {
+    const float scale = text_scale / 100.f;
     if (!data.live)
         return {320.f * scale, 250.f * scale};
     const auto font = [scale](int size) { return static_cast<float>(std::lround(size * scale)); };
@@ -833,9 +921,9 @@ Clay_Dimensions hover_size(const Usage& data, int text_percent) {
             continue;
         if (providers++)
             height += 11; // Divider and its additional root gap.
-        height += 14 + font(14) + font(11);
+        height += 14 + font(14) + font(12);
         height += account->windows.empty() ? 6 + font(13)
-            : (font(14) + font(12) + 19) * static_cast<float>(account->windows.size());
+            : (font(14) + font(13) + 19) * static_cast<float>(account->windows.size());
     }
     if (!providers)
         height += 14 + font(14) + font(11);
@@ -850,7 +938,7 @@ void View::allowance_row(const char* name, const char* provider, const Allowance
         line.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
         line.layout.childAlignment.y = CLAY_ALIGN_Y_CENTER;
         CLAY_AUTO_ID (line) {
-            text(window.label.c_str(), settings ? settings_body : 12, {172, 190, 210, 255});
+            text(window.label.c_str(), settings ? settings_body : 13, {172, 190, 210, 255});
             auto space = column(0, 0);
             CLAY_AUTO_ID (space) {
             }
@@ -869,7 +957,7 @@ void View::allowance_row(const char* name, const char* provider, const Allowance
             CLAY_AUTO_ID (fill) {
             }
         }
-        text(label(hover_reset(window.resets_at, now)), settings ? settings_help : 12, {157, 174, 193, 255});
+        text(label(hover_reset(window.resets_at, now)), settings ? settings_help : 13, {157, 174, 193, 255});
     }
 }
 float View::hover_height(Usage& data, float width) {
@@ -911,18 +999,18 @@ void View::hover_usage(const Usage& data) {
                         text(label(freshness(account.updated, now)), 11, {157, 174, 193, 255});
                 }
                 if (!account.plan.empty())
-                    text(label("Plan: " + account.plan), 11, {157, 174, 193, 255});
+                    text(label("Plan: " + account.plan), 12, {157, 174, 193, 255});
                 if (account.unlimited_credits)
-                    text(label("Credits: unlimited"), 12, {157, 174, 193, 255});
+                    text(label("Credits: unlimited"), 13, {157, 174, 193, 255});
                 else if (!account.credit_balance.empty())
-                    text(label("Credits: " + account.credit_balance), 12, {157, 174, 193, 255});
+                    text(label("Credits: " + account.credit_balance), 13, {157, 174, 193, 255});
                 else if (account.has_credits.has_value())
                     text(label(*account.has_credits ? "Credits available" : "No credits remaining"),
-                                 12, {157, 174, 193, 255});
+                                 13, {157, 174, 193, 255});
                 if (account.available_resets.has_value())
                     text(label(std::to_string(*account.available_resets) +
                                      (*account.available_resets == 1 ? " earned reset available" : " earned resets available")),
-                                 12, {157, 174, 193, 255});
+                                 13, {157, 174, 193, 255});
                 if (account.windows.empty())
                     text(account.error.empty() ? "Connecting..." : "Refresh failed - click widget", 13,
                          {157, 174, 193, 255});
@@ -1035,7 +1123,7 @@ void View::apply_theme() {
 
 void View::live_panel(const Usage& data, Frame& result, ClayWidgets_Input input) {
     if (surface_ == Surface::Widget && (data.codex_active() || data.claude_active())) {
-        const bool horizontal = preferences_.appearance.text_percent > stacked_text_limit();
+        const bool horizontal = preferences_.appearance.taskbar_text_scale() > stacked_text_limit();
         auto root = column(widget_gap(6, 2), widget_gap(horizontal ? 12 : 2, horizontal ? 2 : 0));
         root.layout.padding.top = root.layout.padding.bottom = widget_gap(2);
         root.layout.sizing.height = CLAY_SIZING_GROW(0);
@@ -1075,68 +1163,97 @@ void View::live_panel(const Usage& data, Frame& result, ClayWidgets_Input input)
                 if (preferences_.appearance.show_resets)
                     widget_columns_.reset = std::max(widget_columns_.reset, text_width(reset.c_str(), 9));
             }
+            // The bars end at two thirds of the width, with spare room after the
+            // trailing text; they start right after the provider names, which
+            // read as labels for them.
+            const bool resets = widget_columns_.reset > 0;
+            const auto padding = thirds_padding(widget_columns_.label + bar_gap(),
+                                                bar_gap() + widget_columns_.percent +
+                                                    (resets ? 6 + widget_columns_.reset : 0.f));
+            (resets ? widget_columns_.reset : widget_columns_.percent) += padding.trail;
         }
-        CLAY (CLAY_ID("Providers"), root) {
-            for (const auto& entry : {std::pair<const char*, const AccountUsage*>{"Codex", &data.codex},
-                                      {"Claude", &data.claude}}) {
-                const auto& account = *entry.second;
-                if (!(entry.second == &data.codex ? data.codex_active() : data.claude_active()))
-                    continue;
-                if (entry.second == &data.claude) {
-                    const auto weekly = std::find_if(account.windows.begin(), account.windows.end(),
-                                                     [](const auto& w) { return w.label == "Weekly"; });
-                    const auto fable = std::find_if(account.windows.begin(), account.windows.end(),
-                                                    [](const auto& w) { return w.label == "Fable weekly"; });
-                    if (weekly != account.windows.end() && fable != account.windows.end()) {
-                        if (!data.codex_active()) {
-                            claude_only(account, *weekly, *fable);
-                        } else
-                            claude_bars(account, *weekly, *fable);
-                        continue;
-                    }
+        // Stacked providers each take a third-height slot; the slots do the spacing.
+        const bool stacked = !horizontal && data.codex_active() && data.claude_active();
+        if (stacked)
+            root.layout.childGap = 0;
+        const auto provider_row = [&](const char* name, const AccountUsage& account) {
+            if (&account == &data.claude) {
+                const auto weekly = std::find_if(account.windows.begin(), account.windows.end(),
+                                                 [](const auto& w) { return w.label == "Weekly"; });
+                const auto fable = std::find_if(account.windows.begin(), account.windows.end(),
+                                                [](const auto& w) { return w.label == "Fable weekly"; });
+                if (weekly != account.windows.end() && fable != account.windows.end()) {
+                    if (!data.codex_active()) {
+                        claude_only(account, *weekly, *fable);
+                    } else
+                        claude_bars(account, *weekly, *fable);
+                    return;
                 }
-                if (entry.second == &data.codex && !data.claude_active()) {
-                    const auto session = std::find_if(account.windows.begin(), account.windows.end(),
-                        [](const auto& window) { return window.label == "5 hour"; });
-                    const auto weekly = std::find_if(account.windows.begin(), account.windows.end(),
-                        [](const auto& window) { return window.label == "Weekly"; });
-                    if (session != account.windows.end() && weekly != account.windows.end()) {
-                        codex_only_split(account, *session, *weekly);
-                        continue;
-                    }
+            }
+            if (&account == &data.codex && !data.claude_active()) {
+                const auto session = std::find_if(account.windows.begin(), account.windows.end(),
+                    [](const auto& window) { return window.label == "5 hour"; });
+                const auto weekly = std::find_if(account.windows.begin(), account.windows.end(),
+                    [](const auto& window) { return window.label == "Weekly"; });
+                if (session != account.windows.end() && weekly != account.windows.end()) {
+                    codex_only_split(account, *session, *weekly);
+                    return;
                 }
-                const auto lowest =
-                    std::min_element(account.windows.begin(), account.windows.end(),
-                                     [](const auto& a, const auto& b) { return a.remaining < b.remaining; });
-                if (lowest == account.windows.end())
-                    text(label(std::string(entry.first) +
-                               (account.error.empty() ? ": connecting..." : ": unavailable")),
-                         10, {240, 180, 90, 255});
-                else if (entry.second == &data.codex && !data.claude_active() &&
-                         preferences_.appearance.show_resets) {
-                    const int percent = std::min(preferences_.appearance.text_percent, 160);
-                    const auto now = reference_time_ ? reference_time_ : static_cast<std::int64_t>(std::time(nullptr));
-                    const auto subtitle = lowest->label + ", " + hover_reset(lowest->resets_at, now);
-                    int subtitle_percent = std::min(percent, 145);
-                    while (subtitle_percent > 50 &&
-                           text_width(subtitle.c_str(), 11, subtitle_percent) > frame_width_ - 12)
-                        --subtitle_percent;
-                    // Keep the bar aligned with the full widget and its hover card.
-                    // The reset subtitle must not determine the visible row width.
-                    auto container = column(0, 0);
-                    CLAY_AUTO_ID (container) {
-                        auto codex = column(0, 2);
-                        CLAY (CLAY_ID("CodexOnly"), codex) {
-                            compact_bar("Codex", account.error.empty() ? "Codex" : "Codex *", lowest->remaining,
-                                        label(std::to_string(lowest->remaining) + "%"), percent);
-                            auto reset = column(0, 0);
-                            CLAY (CLAY_ID("CodexReset"), reset) {
-                                text(label(subtitle), 11, {166, 187, 208, 255}, subtitle_percent);
-                            }
+            }
+            const auto lowest =
+                std::min_element(account.windows.begin(), account.windows.end(),
+                                 [](const auto& a, const auto& b) { return a.remaining < b.remaining; });
+            if (lowest == account.windows.end())
+                text(label(std::string(name) +
+                           (account.error.empty() ? ": connecting..." : ": unavailable")),
+                     10, {240, 180, 90, 255});
+            else if (&account == &data.codex && !data.claude_active() &&
+                     preferences_.appearance.show_resets) {
+                const int percent = std::min(preferences_.appearance.taskbar_text_scale(), 160);
+                const auto now = reference_time_ ? reference_time_ : static_cast<std::int64_t>(std::time(nullptr));
+                const auto reset = hover_reset(lowest->resets_at, now);
+                const auto title = account.error.empty() ? "Codex" : "Codex *";
+                // The subtitle spans the bar row: the window's name under the
+                // provider name, its reset ending under the percentage. It keeps
+                // the other taskbar reset lines' size unless that won't fit.
+                constexpr float subtitle_gap = 8;
+                int subtitle_percent = percent;
+                while (subtitle_percent > 50 && text_width(lowest->label.c_str(), 9, subtitle_percent) + subtitle_gap +
+                                                        text_width(reset.c_str(), 9, subtitle_percent) >
+                                                    frame_width_ - 12)
+                    --subtitle_percent;
+                // Keep the bar aligned with the full widget and its hover card.
+                // The reset subtitle must not determine the visible row width.
+                auto codex = column(0, 0);
+                CLAY (CLAY_ID("CodexOnly"), codex) {
+                    CLAY_AUTO_ID (thirds_slot(10, percent)) {
+                        compact_bar("Codex", title, lowest->remaining,
+                                    label(std::to_string(lowest->remaining) + "%"), percent);
+                    }
+                    auto subtitle = thirds_slot(10, percent);
+                    subtitle.layout.childGap = static_cast<uint16_t>(subtitle_gap);
+                    CLAY (CLAY_ID("CodexReset"), subtitle) {
+                        text(lowest->label.c_str(), 9, {166, 187, 208, 255}, subtitle_percent, true);
+                        auto space = column(0, 0);
+                        CLAY_AUTO_ID (space) {
                         }
+                        text(label(reset), 9, {166, 187, 208, 255}, subtitle_percent);
+                    }
+                }
+            } else
+                taskbar_allowance(name, name, *lowest, !account.error.empty());
+        };
+        CLAY (CLAY_ID("Providers"), root) {
+            for (const auto& [name, account] : {std::pair<const char*, const AccountUsage*>{"Codex", &data.codex},
+                                                {"Claude", &data.claude}}) {
+                if (!(account == &data.codex ? data.codex_active() : data.claude_active()))
+                    continue;
+                if (stacked) {
+                    CLAY_AUTO_ID (thirds_slot(10)) {
+                        provider_row(name, *account);
                     }
                 } else
-                    taskbar_allowance(entry.first, entry.first, *lowest, !account.error.empty());
+                    provider_row(name, *account);
             }
         }
     } else if (!data.codex_active() && !data.claude_active()) {
@@ -1174,7 +1291,7 @@ void View::demo_widget(const Usage& data) {
     root.layout.padding.bottom = 2;
     root.layout.sizing.height = CLAY_SIZING_GROW(0);
     CLAY (CLAY_ID("Widget"), root) {
-        if (preferences_.appearance.text_percent <= 160)
+        if (preferences_.appearance.taskbar_text_scale() <= 160)
             text("DEMO   REMAINING", 9, hovered_ ? accent_color() : Clay_Color{166, 187, 208, 255});
         auto row = column(0, 10);
         row.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
@@ -1234,12 +1351,12 @@ void View::demo_settings(Frame& result, ClayWidgets_Input input) {
             result.changed = setting_slider("HoverTextSizeSlider", "Hover text size", a.hover_text_percent,
                                             preference_limits::text_percent, "%") ||
                              result.changed;
-            text("150% default  /  100-300% range", 12, {157, 174, 193, 255});
+            text("100% default  /  65-200% range", 12, {157, 174, 193, 255});
             text("Larger taskbar text uses more taskbar space.", 11, {157, 174, 193, 255});
             if (ClayWidgets_Button(widgets_.get(), CLAY_ID("ResetTextSize"),
                                    CLAY_STRING("Reset to default"))) {
-                set_text_percent(150);
-                set_hover_text_percent(150);
+                set_text_percent(Appearance{}.text_percent);
+                set_hover_text_percent(Appearance{}.hover_text_percent);
                 result.changed = true;
             }
             Clay_ElementDeclaration space{};
@@ -1306,6 +1423,7 @@ void View::demo_details(Usage& data, Frame& result, ClayWidgets_Input input) {
 Frame View::frame(Usage& data, ClayWidgets_Input input, float width, float height) {
     Clay_SetCurrentContext(clay_);
     frame_width_ = width;
+    frame_height_ = height;
     labels_.clear();
     if (surface_ == Surface::Widget) {
         widget_width_ = width;

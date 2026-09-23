@@ -58,11 +58,11 @@ void App::finish_live_test() {
     const bool claude_ok = !usage_.claude.installed || (usage_.claude.updated && usage_.claude.error.empty());
     const bool connected =
         usage_.live && codex_ok && claude_ok && (usage_.codex.installed || usage_.claude.installed);
-    const bool embedded = widget_ && IsWindowVisible(widget_) && !widget_bounds_.empty();
+    const bool embedded = primary_.window && IsWindowVisible(primary_.window) && !primary_.bounds.empty();
     if (embedded) {
-        UpdateWindow(widget_);
+        UpdateWindow(primary_.window);
         DwmFlush();
-        capture_widget(widget_bounds_, executable_directory() / L"codex-widget.bmp");
+        capture_widget(primary_.bounds, executable_directory() / L"codex-widget.bmp");
         hovered_ = true;
         show_hover();
         UpdateWindow(hover_);
@@ -94,9 +94,9 @@ void App::finish_live_test() {
 void App::finish_smoke_test() {
     smoke_ = false;
     KillTimer(controller_, 1);
-    const bool embedded = widget_ && !widget_bounds_.empty() && IsWindowVisible(widget_) &&
-                          GetParent(widget_) == FindWindowW(L"Shell_TrayWnd", nullptr) &&
-                          window_rect(widget_) == widget_bounds_;
+    const bool embedded = primary_.window && !primary_.bounds.empty() && IsWindowVisible(primary_.window) &&
+                          GetParent(primary_.window) == FindWindowW(L"Shell_TrayWnd", nullptr) &&
+                          window_rect(primary_.window) == primary_.bounds;
     bool popup = false, sliders = false, visible = false, closed = false, recreated = false, hit_area = false,
          keyboard = false, idle = false;
     bool hover_shown = false, hover_left = false, hover_click = false;
@@ -104,27 +104,27 @@ void App::finish_smoke_test() {
     if (embedded) {
         reset_widget();
         tick();
-        recreated = widget_ && IsWindowVisible(widget_) &&
-                    GetParent(widget_) == FindWindowW(L"Shell_TrayWnd", nullptr);
-        UpdateWindow(widget_);
+        recreated = primary_.window && IsWindowVisible(primary_.window) &&
+                    GetParent(primary_.window) == FindWindowW(L"Shell_TrayWnd", nullptr);
+        UpdateWindow(primary_.window);
         DwmFlush();
         hit_area = recreated;
         // Test OS hit detection, not just direct messages that bypass transparency.
         for (const POINT point : {POINT{2, 2}, POINT{100, 16}, POINT{28, 23}, POINT{205, 35}}) {
-            const POINT screen{widget_bounds_.x + MulDiv(point.x, widget_bounds_.width, widget_width),
-                               widget_bounds_.y + MulDiv(point.y, widget_bounds_.height, widget_height)};
-            hit_area = hit_area && WindowFromPoint(screen) == widget_;
+            const POINT screen{primary_.bounds.x + MulDiv(point.x, primary_.bounds.width, widget_width),
+                               primary_.bounds.y + MulDiv(point.y, primary_.bounds.height, widget_height)};
+            hit_area = hit_area && WindowFromPoint(screen) == primary_.window;
         }
         // Exercise the same click handler and slider notification used interactively.
         const auto foreground = GetForegroundWindow();
-        SendMessageW(widget_, WM_MOUSEMOVE, 0, MAKELPARAM(2, 2));
+        SendMessageW(primary_.window, WM_MOUSEMOVE, 0, MAKELPARAM(2, 2));
         hover_shown = IsWindowVisible(hover_) && GetForegroundWindow() == foreground;
         if (hover_shown) {
             UpdateWindow(hover_);
             DwmFlush();
             capture_widget(window_rect(hover_), executable_directory() / L"hover-live.bmp");
         }
-        SendMessageW(widget_, WM_MOUSELEAVE, 0, 0);
+        SendMessageW(primary_.window, WM_MOUSELEAVE, 0, 0);
         const bool grace = IsWindowVisible(hover_);
         // Exercise dismissal after the grace period with the pointer off both surfaces.
         POINT saved_pointer{};
@@ -133,9 +133,9 @@ void App::finish_smoke_test() {
         SendMessageW(hover_, WM_TIMER, 1, 0);
         hover_left = grace && !IsWindowVisible(hover_);
         SetCursorPos(saved_pointer.x, saved_pointer.y);
-        SendMessageW(widget_, WM_MOUSEMOVE, 0, MAKELPARAM(2, 2));
-        SendMessageW(widget_, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(2, 2));
-        SendMessageW(widget_, WM_LBUTTONUP, 0, MAKELPARAM(2, 2));
+        SendMessageW(primary_.window, WM_MOUSEMOVE, 0, MAKELPARAM(2, 2));
+        SendMessageW(primary_.window, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(2, 2));
+        SendMessageW(primary_.window, WM_LBUTTONUP, 0, MAKELPARAM(2, 2));
         hover_click = !IsWindowVisible(hover_);
         popup = popup_ && IsWindowVisible(popup_);
         if (popup) {
@@ -168,13 +168,13 @@ void App::finish_smoke_test() {
             SendMessageW(popup_, WM_LBUTTONUP, 0, MAKELPARAM(cx, cy));
             closed = !IsWindowVisible(popup_);
         }
-        UpdateWindow(widget_);
+        UpdateWindow(primary_.window);
         DwmFlush();
         const unsigned before = widget_frames_ + details_frames_;
         tick();
-        UpdateWindow(widget_);
+        UpdateWindow(primary_.window);
         idle = widget_frames_ + details_frames_ == before;
-        visible = capture_widget(widget_bounds_, executable_directory() / L"widget-live.bmp");
+        visible = capture_widget(primary_.bounds, executable_directory() / L"widget-live.bmp");
     }
     open_details(true);
     if (IsWindowVisible(popup_)) {
@@ -190,7 +190,8 @@ void App::finish_smoke_test() {
         SendMessageW(popup_, WM_KEYDOWN, VK_TAB, 0);
         SendMessageW(popup_, WM_KEYDOWN, VK_END, 0);
         SendMessageW(popup_, WM_KEYDOWN, VK_HOME, 0);
-        for (int i = 0; i < 5; ++i)
+        // Seven 5% steps up from the 65% minimum land back on the 100% default.
+        for (int i = 0; i < 7; ++i)
             SendMessageW(popup_, WM_KEYDOWN, VK_RIGHT, 0);
         // Focus order: taskbar text, hover text, reset, save.
         SendMessageW(popup_, WM_KEYDOWN, VK_TAB, 0);
@@ -198,16 +199,16 @@ void App::finish_smoke_test() {
         SendMessageW(popup_, WM_KEYDOWN, VK_TAB, 0);
         SendMessageW(popup_, WM_KEYDOWN, VK_RETURN, 0);
         settings_saved =
-            !IsWindowVisible(popup_) && preferences_.appearance.text_percent == 150 &&
-            GetPrivateProfileIntW(L"Appearance", L"TextPercent", 0, settings_path_.c_str()) == 150 &&
-            GetPrivateProfileIntW(L"Appearance", L"HoverTextPercent", 0, settings_path_.c_str()) == 150;
+            !IsWindowVisible(popup_) && preferences_.appearance.text_percent == 100 &&
+            GetPrivateProfileIntW(L"Appearance", L"TextSize", 0, settings_path_.c_str()) == 100 &&
+            GetPrivateProfileIntW(L"Appearance", L"HoverTextSize", 0, settings_path_.c_str()) == 100;
         open_details(true);
         SendMessageW(popup_, WM_KEYDOWN, VK_TAB, 0);
         SendMessageW(popup_, WM_KEYDOWN, VK_HOME, 0);
         SendMessageW(popup_, WM_KEYDOWN, VK_ESCAPE, 0);
         open_details(true);
         settings_cancelled =
-            preferences_.appearance.text_percent == 150 && details_view_.text_percent() == 150;
+            preferences_.appearance.text_percent == 100 && details_view_.text_percent() == 100;
         close_details();
     }
     // Exercise the normal unified panel with deterministic provider data.
@@ -248,10 +249,10 @@ void App::finish_smoke_test() {
     unified = tab_to("TextSizeSlider") && unified;
     SendMessageW(popup_, WM_KEYDOWN, VK_HOME, 0);
     open_details(true);
-    const bool unified_edits = details_view_.text_percent() == 100 &&
-                               preferences_.appearance.text_percent == 100 &&
-                               widget_view_.text_percent() == 100 && hover_view_.text_percent() == 100 &&
-                               hover_view_.hover_text_percent() == 150;
+    const bool unified_edits = details_view_.text_percent() == 65 &&
+                               preferences_.appearance.text_percent == 65 &&
+                               widget_view_.text_percent() == 65 && hover_view_.text_percent() == 65 &&
+                               hover_view_.hover_text_percent() == 100;
     // Settings pin the hover card open as a live preview without taking focus from the panel.
     RECT pinned_card{}, pinned_popup{};
     const bool hover_pinned = hover_pinned_ && IsWindowVisible(hover_) && GetWindowRect(hover_, &pinned_card) &&
@@ -264,9 +265,9 @@ void App::finish_smoke_test() {
     close_details();
     const bool hover_unpinned = !hover_pinned_ && !IsWindowVisible(hover_);
     open_details();
-    const bool unified_cancel = details_view_.text_percent() == 150 &&
-                                preferences_.appearance.text_percent == 150 &&
-                                widget_view_.text_percent() == 150 && hover_view_.text_percent() == 150;
+    const bool unified_cancel = details_view_.text_percent() == 100 &&
+                                preferences_.appearance.text_percent == 100 &&
+                                widget_view_.text_percent() == 100 && hover_view_.text_percent() == 100;
     close_details();
     const auto foreground = GetForegroundWindow();
     hovered_ = true;
@@ -308,8 +309,8 @@ void App::finish_smoke_test() {
     DwmFlush();
     capture_widget(window_rect(popup_), executable_directory() / L"settings-default.bmp");
     click_setting("EnableCodex");
-    if (widget_)
-        UpdateWindow(widget_);
+    if (primary_.window)
+        UpdateWindow(primary_.window);
     const bool provider_preview =
         !usage_.codex_enabled && usage_.claude_enabled && widget_view_.bounds("ClaudeGeneral").width > 0 &&
         widget_view_.bounds("ClaudeFable").width > 0 &&
@@ -349,28 +350,28 @@ void App::finish_smoke_test() {
     usage_.claude.windows[1].resets_at = 1790583271;
     usage_.claude.windows[2].resets_at = 1790669671;
     tick();
-    if (widget_) {
-        InvalidateRect(widget_, nullptr, FALSE);
-        UpdateWindow(widget_);
+    if (primary_.window) {
+        InvalidateRect(primary_.window, nullptr, FALSE);
+        UpdateWindow(primary_.window);
         DwmFlush();
     }
     const bool claude_split =
         widget_view_.bounds("ClaudeGeneral").width > 0 && widget_view_.bounds("ClaudeFable").width > 0;
-    capture_widget(widget_bounds_, executable_directory() / L"claude-only-taskbar.bmp");
+    capture_widget(primary_.bounds, executable_directory() / L"claude-only-taskbar.bmp");
     open_details();
     show_page(ui::SettingsPage::Taskbar);
     click_setting("WidgetWidth");
     SendMessageW(popup_, WM_KEYDOWN, VK_HOME, 0);
-    if (widget_)
-        UpdateWindow(widget_);
+    if (primary_.window)
+        UpdateWindow(primary_.window);
     hovered_ = true;
     show_hover();
     UpdateWindow(hover_);
     DwmFlush();
     const bool smaller_widths =
         preferences_.appearance.widget_width == 100 &&
-        widget_bounds_.width == MulDiv(100, GetDpiForWindow(widget_), 96) && IsWindowVisible(hover_);
-    capture_widget(widget_bounds_, executable_directory() / L"small-widget.bmp");
+        primary_.bounds.width == MulDiv(100, GetDpiForWindow(primary_.window), 96) && IsWindowVisible(hover_);
+    capture_widget(primary_.bounds, executable_directory() / L"small-widget.bmp");
     capture_widget(window_rect(hover_), executable_directory() / L"small-hover.bmp");
     close_details();
     std::ofstream report(executable_directory() / L"smoke-test.txt");
@@ -393,8 +394,8 @@ void App::finish_smoke_test() {
            << "\nSettings centered: " << settings_centered << "\nSettings saved: " << settings_saved
            << "\nSettings cancel: " << settings_cancelled << "\nHover without activation: " << hover_shown
            << "\nHover dismissed on leave: " << hover_left << "\nHover dismissed on click: " << hover_click
-           << "\nVisible bar pixels: " << visible << "\nBounds: " << widget_bounds_.x << ','
-           << widget_bounds_.y << ' ' << widget_bounds_.width << 'x' << widget_bounds_.height << '\n';
+           << "\nVisible bar pixels: " << visible << "\nBounds: " << primary_.bounds.x << ','
+           << primary_.bounds.y << ' ' << primary_.bounds.width << 'x' << primary_.bounds.height << '\n';
     const bool passed = embedded && popup && sliders && closed && recreated && hit_area && keyboard && idle &&
                         visible && hover_shown && hover_left && hover_click && settings_centered &&
                         hover_pinned && hover_clear && hover_unpinned &&

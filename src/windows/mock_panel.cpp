@@ -11,14 +11,14 @@
 namespace usage::windows {
 namespace {
 constexpr wchar_t panel_class[] = L"UsageTracker.MockPanel.Cpp";
-constexpr int preset_id = 900;
+constexpr int preset_id = 900, reset_button_id = 910;
 constexpr int state_field = 1, plan_field = 2, model_name_field = 3, credits_field = 4, earned_field = 5;
 constexpr int present_field = 10, used_field = 11, resets_field = 12;
 constexpr MockState states[] = {MockState::Ready, MockState::Missing, MockState::LoginError, MockState::Connecting,
                                 MockState::Malformed};
 // Layout, in DIPs.
 constexpr int margin = 16, column_width = 330, column_gap = 20;
-constexpr int client_width = margin * 2 + column_width * 2 + column_gap, client_height = 500;
+constexpr int client_width = margin * 2 + column_width * 2 + column_gap, client_height = 530;
 constexpr int allowance_top = 144, allowance_step = 86;
 
 int control_id(int provider, int field, int allowance = 0) {
@@ -63,8 +63,9 @@ std::wstring duration(int minutes) {
 }
 } // namespace
 
-MockPanel::MockPanel(std::shared_ptr<MockProviders> providers, std::function<void()> changed)
-    : providers_(std::move(providers)), changed_(std::move(changed)) {
+MockPanel::MockPanel(std::shared_ptr<MockProviders> providers, std::function<void()> changed,
+                     std::function<void()> celebrate)
+    : providers_(std::move(providers)), changed_(std::move(changed)), celebrate_(std::move(celebrate)) {
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_BAR_CLASSES | ICC_STANDARD_CLASSES};
     InitCommonControlsEx(&controls);
     WNDCLASSEXW cls{};
@@ -110,7 +111,9 @@ LRESULT CALLBACK MockPanel::proc(HWND window, UINT message, WPARAM w, LPARAM l) 
     switch (message) {
     case WM_COMMAND: {
         const int id = LOWORD(w), code = HIWORD(w);
-        if (id == preset_id && code == CBN_SELCHANGE) {
+        if ((id == reset_button_id || id == reset_button_id + 1) && code == BN_CLICKED) {
+            panel->simulate_reset(id - reset_button_id);
+        } else if (id == preset_id && code == CBN_SELCHANGE) {
             const auto index = SendMessageW(panel->preset_, CB_GETCURSEL, 0, 0);
             if (index >= 0 && static_cast<std::size_t>(index) < mock_presets().size()) {
                 panel->show_scenario(mock_presets()[static_cast<std::size_t>(index)].scenario);
@@ -170,6 +173,8 @@ void MockPanel::build_provider(int index, int left) {
     const bool claude = index == 1;
     const int right = left + column_width;
     add(WC_BUTTONW, claude ? L"Claude" : L"Codex", BS_GROUPBOX, {left, 52, right, client_height - 46});
+    add(WC_BUTTONW, L"Simulate reset", BS_PUSHBUTTON | WS_TABSTOP,
+        {left + 12, client_height - 88, left + 140, client_height - 60}, reset_button_id + index);
     add(WC_STATICW, L"State", SS_LEFT, {left + 12, 83, left + 88, 103});
     controls.state = add(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
                          {left + 90, 80, right - 12, 260}, control_id(index, state_field));
@@ -329,5 +334,28 @@ void MockPanel::apply(bool from_preset) {
     update_labels();
     providers_->set(read_scenario());
     changed_();
+}
+// A window with usage to give back resets through the app's own detection on
+// the next reading; one already empty would not, so the button celebrates
+// directly and can be pressed again and again.
+void MockPanel::simulate_reset(int index) {
+    const auto scenario = providers_->scenario();
+    const auto& provider = index ? scenario.claude : scenario.codex;
+    bool detected = false;
+    if (provider.state == MockState::Ready)
+        for (const auto* allowance : {&provider.session, &provider.weekly, &provider.model})
+            detected = detected || (allowance->present && allowance->used_percent > 0);
+    syncing_ = true;
+    for (int a = 0; a < 3; ++a) {
+        const auto& allowance = controls_[index].allowances[a];
+        if (!allowance.present)
+            continue;
+        SendMessageW(allowance.used, TBM_SETPOS, TRUE, 0);
+        set_text(allowance.resets, a == 0 ? L"300" : L"10080");
+    }
+    syncing_ = false;
+    apply(false);
+    if (!detected)
+        celebrate_();
 }
 } // namespace usage::windows

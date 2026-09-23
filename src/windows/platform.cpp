@@ -1,7 +1,9 @@
 #include "windows/platform.hpp"
 #include <windows.h>
 #include <dwmapi.h>
+#include <filesystem>
 #include <fstream>
+#include <iterator>
 
 namespace usage::windows {
 bool system_light_theme() {
@@ -79,9 +81,31 @@ void log(const std::wstring& message) {
     const auto directory = std::filesystem::path(local) / L"UsageTracker";
     std::error_code error;
     std::filesystem::create_directories(directory, error);
+    const auto path = directory / L"prototype.log";
+    // The log is capped at 1 MB: past that, drop the oldest half, cutting at a
+    // line boundary, so the newest history always survives.
+    constexpr std::uintmax_t log_limit = 1024 * 1024;
+    const auto size = std::filesystem::file_size(path, error);
+    if (!error && size >= log_limit) {
+        std::string contents;
+        {
+            std::ifstream old(path, std::ios::binary);
+            contents.assign(std::istreambuf_iterator<char>(old), std::istreambuf_iterator<char>());
+        }
+        const auto cut = contents.find('\n', contents.size() - log_limit / 2);
+        auto trimmed = path;
+        trimmed += L".tmp";
+        {
+            std::ofstream kept(trimmed, std::ios::binary | std::ios::trunc);
+            if (cut != std::string::npos)
+                kept.write(contents.data() + cut + 1, static_cast<std::streamsize>(contents.size() - cut - 1));
+        }
+        if (!MoveFileExW(trimmed.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING))
+            std::filesystem::remove(trimmed, error);
+    }
     SYSTEMTIME now{};
     GetLocalTime(&now);
-    std::ofstream stream(directory / L"prototype.log", std::ios::app);
+    std::ofstream stream(path, std::ios::app);
     const int count = WideCharToMultiByte(CP_UTF8, 0, message.data(), static_cast<int>(message.size()),
                                           nullptr, 0, nullptr, nullptr);
     std::string text(static_cast<std::size_t>(count), '\0');

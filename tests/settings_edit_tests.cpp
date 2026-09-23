@@ -21,7 +21,7 @@ int main() {
         draft.codex_enabled = false;
         draft.claude_interval = 1;
         auto current = edit.preview(draft);
-        check(current.appearance.text_percent == 300 && current.claude_interval == 15,
+        check(current.appearance.text_percent == 200 && current.claude_interval == 15,
               "Preview normalizes appearance and provider settings");
         edit.begin(current);
         check(edit.cancel() == saved, "Repeated opening must retain the original rollback snapshot");

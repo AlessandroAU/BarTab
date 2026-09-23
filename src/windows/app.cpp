@@ -12,11 +12,13 @@ App::App(bool smoke, bool live_test, std::shared_ptr<MockProviders> mock)
     register_class(widget_class, widget_proc);
     register_class(popup_class, popup_proc);
     register_class(hover_class, hover_proc);
+    register_class(confetti_class, confetti_proc);
     controller_ =
         CreateWindowExW(WS_EX_TOOLWINDOW, controller_class, L"UsageTracker controller", WS_OVERLAPPED, 0, 0,
                         0, 0, nullptr, nullptr, GetModuleHandleW(nullptr), this);
     if (!controller_)
         throw std::runtime_error("Could not create controller window");
+    frames_ = std::make_unique<FrameClock>(controller_, frame_message);
     update_system_font();
     update_animation_preference();
     load_settings();
@@ -47,7 +49,7 @@ bool App::reload_ui_font() {
     widget_view_.invalidate_measurements();
     hover_view_.invalidate_measurements();
     details_view_.invalidate_measurements();
-    if (widget_) InvalidateRect(widget_, nullptr, FALSE);
+    invalidate_widgets();
     if (IsWindowVisible(hover_)) show_hover();
     return true;
 }
@@ -61,7 +63,14 @@ void App::update_system_font() {
 // Smoke tests drive the popup synchronously and read layout back, so they keep
 // the deterministic path; otherwise follow the Windows accessibility switch.
 void App::update_animation_preference() {
-    details_view_.set_animations(animations_allowed_ && client_animations_enabled());
+    const bool enabled = animations_allowed_ && client_animations_enabled();
+    // Logged at start and on change: Windows' "Animation effects" switch turning
+    // everything off is the usual answer to "why is nothing animating".
+    if (animations_logged_ != static_cast<int>(enabled)) {
+        animations_logged_ = enabled;
+        log(enabled ? L"Animations on" : L"Animations off (Windows animation effects are disabled)");
+    }
+    details_view_.set_animations(enabled);
 }
 
 App::~App() {
@@ -73,6 +82,8 @@ App::~App() {
     reset_widget();
     if (hover_)
         DestroyWindow(hover_);
+    if (confetti_window_)
+        DestroyWindow(confetti_window_);
     if (controller_)
         DestroyWindow(controller_);
     log(L"Stopped native prototype.");
@@ -119,14 +130,23 @@ LRESULT CALLBACK App::controller_proc(HWND window, UINT message, WPARAM w, LPARA
             app->update_system_font();
             app->update_animation_preference();
             app->tick();
-            if (app->widget_)
-                InvalidateRect(app->widget_, nullptr, FALSE);
+            app->invalidate_widgets();
+            return 0;
+        }
+        if (message == frame_message) {
+            app->frame();
             return 0;
         }
         if (message == WM_TIMER) {
+            const auto codex_before = app->usage_.codex;
+            const auto claude_before = app->usage_.claude;
             const bool codex_changed = app->codex_ && app->codex_->take(app->usage_.codex);
             const bool claude_changed = app->claude_ && app->claude_->take(app->usage_.claude);
             if (codex_changed || claude_changed) {
+                const auto now = std::time(nullptr);
+                if ((codex_changed && !reset_windows(codex_before, app->usage_.codex, now).empty()) ||
+                    (claude_changed && !reset_windows(claude_before, app->usage_.claude, now).empty()))
+                    app->celebrate();
                 app->update_usage();
                 if (IsWindowVisible(app->popup_))
                     app->render_details(app->details_pointer_);
@@ -197,8 +217,7 @@ void App::update_tooltip() {
 void App::update_usage() {
     update_tooltip();
     Shell_NotifyIconW(NIM_MODIFY, &tray_);
-    if (widget_)
-        InvalidateRect(widget_, nullptr, FALSE);
+    invalidate_widgets();
     if (IsWindowVisible(hover_))
         show_hover();
 }
@@ -275,6 +294,15 @@ void App::apply_providers() {
         claude_->set_interval(preferences_.claude_interval);
     } else
         claude_.reset();
+}
+
+void App::frame() {
+    const bool hover = hover_ && IsWindowVisible(hover_) && hover_progress_ < 1.f && animate_hover();
+    const bool details = animate_details();
+    const bool confetti = !confetti_.done() && animate_confetti();
+    if (!hover && !details && !confetti)
+        frames_->stop();
+    frames_->frame_done();
 }
 
 void App::mock_changed() {

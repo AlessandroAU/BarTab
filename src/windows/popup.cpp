@@ -8,8 +8,6 @@ namespace {
 // Longest eased motion in the widget set is the toggle knob at about 0.36 s;
 // the loop outlives it so every transition reaches its target.
 constexpr auto settle_window = std::chrono::milliseconds(500);
-constexpr UINT animation_timer = 3;
-constexpr UINT animation_interval_ms = 16;
 } // namespace
 
 LRESULT CALLBACK App::popup_proc(HWND window, UINT message, WPARAM w, LPARAM l) {
@@ -18,10 +16,6 @@ LRESULT CALLBACK App::popup_proc(HWND window, UINT message, WPARAM w, LPARAM l) 
         switch (message) {
         case WM_CLOSE:
             app->close_details();
-            return 0;
-        case WM_TIMER:
-            if (w == animation_timer)
-                app->animate_details();
             return 0;
         case WM_ERASEBKGND:
             return 1;
@@ -82,7 +76,6 @@ void App::close_details() {
     details_view_.reset_focus();
     if (GetCapture() == popup_)
         ReleaseCapture();
-    KillTimer(popup_, animation_timer);
     ShowWindow(popup_, SW_HIDE);
     unpin_hover();
     cancel_settings_preview();
@@ -95,18 +88,17 @@ void App::render_details(ClayWidgets_Input input) {
         return;
     if (details_view_.animations()) {
         details_settle_until_ = std::chrono::steady_clock::now() + settle_window;
-        SetTimer(popup_, animation_timer, animation_interval_ms, nullptr);
+        frames_->start();
     }
     render_details_frame(input);
 }
 
-void App::animate_details() {
+bool App::animate_details() {
     if (!popup_ || !IsWindowVisible(popup_) || !details_view_.animations() ||
-        std::chrono::steady_clock::now() >= details_settle_until_) {
-        KillTimer(popup_, animation_timer);
-        return;
-    }
+        std::chrono::steady_clock::now() >= details_settle_until_)
+        return false;
     render_details_frame(details_pointer_);
+    return true;
 }
 
 void App::render_details_frame(ClayWidgets_Input input) {
@@ -302,14 +294,15 @@ void App::open_details(bool settings) {
     details_view_.reset_focus();
     details_pointer_ = {};
     details_pointer_.mouseX = details_pointer_.mouseY = -100;
-    UINT dpi = widget_ ? GetDpiForWindow(widget_) : GetDpiForWindow(controller_);
+    const auto& widget = active();
+    UINT dpi = widget.window ? GetDpiForWindow(widget.window) : GetDpiForWindow(controller_);
     if (!dpi)
         dpi = 96;
     RECT size{0, 0, MulDiv(usage_.live ? ui::settings_width : 400, static_cast<int>(dpi), 96),
               MulDiv(usage_.live ? ui::settings_height : 470, static_cast<int>(dpi), 96)};
     POINT cursor{};
     GetCursorPos(&cursor);
-    const Rect anchor = widget_bounds_.empty() ? Rect{cursor.x, cursor.y, 1, 1} : widget_bounds_;
+    const Rect anchor = widget.bounds.empty() ? Rect{cursor.x, cursor.y, 1, 1} : widget.bounds;
     RECT anchor_rect{anchor.x, anchor.y, anchor.right(), anchor.bottom()};
     MONITORINFO monitor{};
     monitor.cbSize = sizeof(monitor);

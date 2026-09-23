@@ -49,18 +49,21 @@ Settings has two independently scrolling panels — **Appearance** and **Provide
 
 | Setting | Range | Default |
 | --- | --- | --- |
-| Taskbar text size | 100–300% | 150% |
+| Taskbar text size | 65–200% in 5% steps | 100% |
 | Widget width | 100–400 px | 225 px |
 | Taskbar position | 0–100% from left | 100% |
+| Show on every monitor | on / off | off |
 | Bar thickness | 3–9 px | 7 px |
 | Corner radius | 0–12 px | 10 px |
 | Hover card | on / off, 240–600 px wide | on, 360 px |
-| Hover text size | 100–300% | 150% (copies Taskbar text size from older settings files) |
+| Hover text size | 65–200% in 5% steps | 100% |
 | Hover opacity | 50–100% | 95% |
 
-Colors and the UI font follow Windows automatically. The application uses Windows app light/dark mode and accent color; the taskbar follows the separate Windows system mode. The font comes from the Windows UI message-font configuration and updates when Windows broadcasts a settings change. Provider colors stay distinct. Older saved Font, Theme, Accent, HoverWidth, and HoverDelay keys are ignored. Text size remains adjustable.
+Colors and the UI font follow Windows automatically. The application uses Windows app light/dark mode and accent color; the taskbar follows the separate Windows system mode. The font comes from the Windows UI message-font configuration and updates when Windows broadcasts a settings change. Provider colors stay distinct. Older saved Font, Theme, Accent, HoverWidth, and HoverDelay keys are ignored. Text size remains adjustable. Taskbar and hover text default to bold, the settings window to regular.
 
-Dimensions are logical pixels, before DPI scaling. Widget width is the widget's real width: text size never changes it, and the bars take whatever room the labels leave, so very large text in a narrow widget squeezes the bars away rather than shrinking the text. Compact spacing lets two rows stay stacked up to 180%; larger text uses side-by-side rows to fit the taskbar height. When a free taskbar gap is narrower than the widget, it narrows down to the 100 px minimum, tightening padding and gaps as it shrinks so the bars keep as much length as possible, and hides only when even that does not fit; the full width returns when space becomes available. The hover card keeps its own text size regardless. **Reset appearance to defaults** leaves provider settings alone.
+Text sizes are relative: 100% draws the taskbar text at 1.5× and the hover card at 1.3× the layouts' base font sizes. Settings files from before this scale saved absolute `TextPercent` and `HoverTextPercent` values; they load converted, so the old 150% taskbar and 130% hover sizes both become 100%, and files older still, with only `TextPercent`, use it for both.
+
+Dimensions are logical pixels, before DPI scaling. Widget width is the widget's real width: text size never changes it, and the bars take whatever room the labels leave, so very large text in a narrow widget squeezes the bars away rather than shrinking the text. Compact spacing lets two rows stay stacked up to 120%; larger text uses side-by-side rows to fit the taskbar height. When a free taskbar gap is narrower than the widget, it narrows down to the 100 px minimum, tightening padding and gaps as it shrinks so the bars keep as much length as possible, and hides only when even that does not fit; the full width returns when space becomes available. The hover card keeps its own text size regardless. **Show on every monitor** adds a widget to each other monitor's taskbar (`Shell_SecondaryTrayWnd`), placed by the same width and position rules at that monitor's DPI; the hover card, settings window and reset confetti open from whichever widget the pointer last used, and a widget is removed when its monitor goes away. **Reset appearance to defaults** leaves provider settings alone.
 
 **Taskbar position** slides the widget along the taskbar: 0% is hard left, 50% centred, 100% hard right. The slider names the spot you want, and the widget takes the closest one it can actually reach — it lands in whichever run of free space gets nearest, so it can sit up against a taskbar button but never underneath one. Free space is recomputed as buttons come and go, so this is a preference rather than a fixed coordinate: on a busy taskbar only one gap may be wide enough, and every position resolves to it.
 
@@ -144,7 +147,7 @@ Get-Content .\bin\smoke-test.txt
 
 It uses an isolated `smoke-settings.ini`, stays offline, writes diagnostic bitmaps beside the executable, and exits after about eight seconds. It does not restart Explorer or change Windows settings. `--live-smoke-test` is the online variant against real signed-in providers, reporting to `bin/codex-live-test.txt`.
 
-Logs: `%LOCALAPPDATA%\UsageTracker\prototype.log`. Tested on Windows 11 build 26200 at 100% scaling with MSVC 19.44, and on Ubuntu 22.04 (WSL, GCC 11.4) for the portable tests.
+Logs: `%LOCALAPPDATA%\UsageTracker\prototype.log`, capped at 1 MB (the oldest half is dropped when it fills). Tested on Windows 11 build 26200 at 100% scaling with MSVC 19.44, and on Ubuntu 22.04 (WSL, GCC 11.4) for the portable tests.
 
 ### Mock providers (debug build)
 

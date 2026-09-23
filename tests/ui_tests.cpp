@@ -1,4 +1,6 @@
 #include "ui/views.hpp"
+#include "ui/confetti.hpp"
+#include <algorithm>
 #include <cmath>
 #include <ctime>
 #include <iostream>
@@ -29,9 +31,42 @@ bool contains(Clay_RenderCommandArray commands, const std::string& expected) {
     }
     return false;
 }
+// Layout checks below are written against the effective text scales the views
+// use; these give the largest text size preference that stays at or under one
+// (100% draws the taskbar at 1.5x and the hover card at 1.3x), so a check never
+// lands just past a threshold it names.
+int taskbar_text(int scale) {
+    return scale * 100 / usage::taskbar_text_base;
+}
+int hover_text(int scale) {
+    return scale * 100 / usage::hover_text_base;
+}
+void confetti_tests() {
+    usage::ui::Confetti confetti(7);
+    check(confetti.done(), "No confetti before a burst");
+    confetti.burst(100, 200, 300, 50);
+    check(confetti.pieces().size() == 50, "A burst launches every piece");
+    for (const auto& piece : confetti.pieces())
+        check(piece.x >= 100 && piece.x <= 300 && piece.vy < 0 && piece.opacity() == 1.f,
+              "Pieces start on the span, rising and opaque");
+    float highest = 300;
+    for (int frame = 0; frame < 30; ++frame) {
+        confetti.step(1.f / 60);
+        for (const auto& piece : confetti.pieces())
+            highest = std::min(highest, piece.y);
+    }
+    check(highest < 200, "The burst rises well above where it started");
+    for (int frame = 0; frame < 180 && !confetti.done(); ++frame)
+        confetti.step(1.f / 60);
+    check(confetti.done(), "Every piece fades out within three seconds");
+    confetti.step(1.f);
+    check(confetti.done(), "An empty burst stays empty");
+    std::cout << "PASS: confetti burst\n";
+}
 } // namespace
 int main() {
     try {
+        confetti_tests();
         {
             usage::ui::View split(usage::ui::Surface::Widget, measure, nullptr);
             usage::Usage account;
@@ -78,7 +113,7 @@ int main() {
             check(!contains(frame.commands, "Credits: 12.5") && !contains(frame.commands, "0 earned resets available"),
                   "Hover omits missing account details");
             usage::Preferences clock_preferences;
-            clock_preferences.appearance.hover_text_percent = 100;
+            clock_preferences.appearance.hover_text_percent = hover_text(100);
             clock_preferences.appearance.twelve_hour_time = true;
             card.set_preferences(clock_preferences);
             std::tm local{};
@@ -117,7 +152,7 @@ int main() {
                 for (const auto& block : occupied)
                     check(!placed.intersects(block), "Fitted taskbar widget avoids buttons");
             }
-            appearance.text_percent = 180;
+            appearance.text_percent = taskbar_text(180);
             pair.codex.windows = {{"Weekly", 81, 1790583271}};
             pair.claude.windows = {{"Weekly", 44, 1790583271}, {"Fable weekly", 23, 1790583271}};
             // A 300 px widget meeting a 270 px gap narrows; the view then tightens its
@@ -148,15 +183,15 @@ int main() {
             widget.frame(pair, neutral(), 300, 38);
             check(narrowed_track > 0 && narrowed_track < widget.bounds("CodexTrack").width,
                   "Narrowed widget shrinks its bars");
-            appearance.text_percent = 300;
+            appearance.text_percent = taskbar_text(300);
             const auto spacious = usage::ui::place_widget(appearance, panel, {}, 1.f);
             check(spacious.width == appearance.widget_width, "Full width returns when space returns");
             check(usage::ui::place_widget(appearance, panel, {panel}, 1.f).empty(),
                   "Completely full taskbar still hides widget safely");
         }
         usage::Preferences baseline;
-        baseline.appearance.text_percent = 100;
-        baseline.appearance.hover_text_percent = 100;
+        baseline.appearance.text_percent = taskbar_text(100);
+        baseline.appearance.hover_text_percent = hover_text(100);
         baseline.appearance.widget_width = 208;
         widget.set_preferences(baseline);
         hover.set_preferences(baseline);
@@ -174,11 +209,16 @@ int main() {
             widget.set_reference_time(1790000000);
             single.codex.windows[0].resets_at = 1790008040;
             auto reset_frame = widget.frame(single, neutral(), 208, 38);
-            check(contains(reset_frame.commands, "Weekly, Resets in 2h 14m"),
+            check(contains(reset_frame.commands, "Weekly") && contains(reset_frame.commands, "Resets in 2h 14m"),
                   "Codex-only reset line uses the same descriptive wording as the hover card");
+            const auto row = widget.bounds("CodexOnly");
+            const auto subtitle = widget.bounds("CodexReset");
+            check(std::abs(subtitle.x - row.x) < 0.5f && std::abs(subtitle.width - row.width) < 0.5f,
+                  "Codex-only reset line spans the bar row");
             single.codex.windows[0].resets_at = 0;
             reset_frame = widget.frame(single, neutral(), 208, 38);
-            check(contains(reset_frame.commands, "Weekly, Reset unavailable"), "Codex-only unknown reset is explicit");
+            check(contains(reset_frame.commands, "Weekly") && contains(reset_frame.commands, "Reset unavailable"),
+                  "Codex-only unknown reset is explicit");
             widget.set_reference_time(0);
         }
         live.codex.error = "Connection failed";
@@ -219,7 +259,7 @@ int main() {
               "Claude merges resets on the same local day despite different times");
         resets.codex_enabled = false;
         for (int percent : {100, 150, 300}) {
-            widget.set_text_percent(percent);
+            widget.set_text_percent(taskbar_text(percent));
             // A widget the user has sized for this text scale.
             const Clay_Dimensions size{208.f * percent / 100.f, 38.f};
             actual = widget.frame(resets, neutral(), size.width, size.height);
@@ -244,7 +284,7 @@ int main() {
         {
             // Combined mode stacks two Claude tracks nearly as thick as a full bar.
             usage::Preferences combined = baseline;
-            combined.appearance.text_percent = 150;
+            combined.appearance.text_percent = taskbar_text(150);
             widget.set_preferences(combined);
             const auto size = usage::ui::widget_size(combined.appearance);
             widget.frame(resets, neutral(), size.width, size.height);
@@ -259,7 +299,7 @@ int main() {
                       std::abs(codex_track.x + codex_track.width - (weekly.x + weekly.width)) < 0.5f,
                   "Combined rows start and end their bars on the same x");
 
-            combined.appearance.text_percent = 100;
+            combined.appearance.text_percent = taskbar_text(100);
             widget.set_preferences(combined);
             widget.frame(resets, neutral(), 208, 38);
             check(widget.bounds("ClaudeWeeklyTrack").height <= 4.5f,
@@ -284,7 +324,7 @@ int main() {
         live.codex.updated = 1789999280;
         live.codex.windows[0].resets_at = 1790008040;
         for (const int percent : {100, 140}) {
-            hover.set_hover_text_percent(percent);
+            hover.set_hover_text_percent(hover_text(percent));
             const auto size = usage::ui::hover_size(live, percent);
             actual = hover.frame(live, neutral(), size.width, size.height);
             check(contains(actual.commands, "Codex - stale") && contains(actual.commands, "Claude") &&
@@ -310,7 +350,7 @@ int main() {
                 }
             }
         }
-        hover.set_hover_text_percent(100);
+        hover.set_hover_text_percent(hover_text(100));
         // Saved provider choices control all surfaces, even with retained readings.
         auto selected = live;
         selected.claude.windows[1].resets_at = 1790583271;
@@ -320,7 +360,7 @@ int main() {
                 selected.codex_enabled = codex;
                 selected.claude_enabled = claude;
                 for (const int percent : {100, 140}) {
-                    widget.set_text_percent(percent);
+                    widget.set_text_percent(taskbar_text(percent));
                     const float width = usage::widget_width * percent / 100.f;
                     actual = widget.frame(selected, neutral(), width, 38);
                     check(contains(actual.commands, "Codex *") == codex,
@@ -361,8 +401,8 @@ int main() {
         for (const int percent : {100, 140}) {
             usage::Preferences narrow;
             narrow.appearance.widget_width = 160;
-            narrow.appearance.text_percent = percent;
-            narrow.appearance.hover_text_percent = percent;
+            narrow.appearance.text_percent = taskbar_text(percent);
+            narrow.appearance.hover_text_percent = hover_text(percent);
             widget.set_preferences(narrow);
             hover.set_preferences(narrow);
             for (const bool codex : {false, true}) {
@@ -390,8 +430,8 @@ int main() {
         }
         for (const int percent : {100, 150, 160, 170, 200, 300}) {
             usage::Preferences sized;
-            sized.appearance.text_percent = percent;
-            sized.appearance.hover_text_percent = percent;
+            sized.appearance.text_percent = taskbar_text(percent);
+            sized.appearance.hover_text_percent = hover_text(percent);
             sized.appearance.widget_width = 150;
             widget.set_preferences(sized);
             hover.set_preferences(sized);
@@ -441,8 +481,8 @@ int main() {
         {
             // The hover card follows its own text size, not the taskbar's.
             usage::Preferences split = baseline;
-            split.appearance.text_percent = 100;
-            split.appearance.hover_text_percent = 200;
+            split.appearance.text_percent = taskbar_text(100);
+            split.appearance.hover_text_percent = hover_text(200);
             hover.set_preferences(split);
             const auto size = usage::ui::hover_size(live, 200);
             actual = hover.frame(live, neutral(), size.width, size.height);
@@ -498,7 +538,7 @@ int main() {
         settings_input = neutral();
         settings_input.keyEnd = true;
         settings.frame(data, settings_input, 400, 470);
-        check(settings.text_percent() == 300 && settings.hover_text_percent() == 150,
+        check(settings.text_percent() == 200 && settings.hover_text_percent() == 100,
               "Settings keyboard selects largest taskbar text without touching the hover size");
         settings_input = neutral();
         settings_input.keyTab = true;
@@ -506,7 +546,7 @@ int main() {
         settings_input = neutral();
         settings_input.keyHome = true;
         settings.frame(data, settings_input, 400, 470);
-        check(settings.hover_text_percent() == 100 && settings.text_percent() == 300,
+        check(settings.hover_text_percent() == 65 && settings.text_percent() == 200,
               "Hover text size has its own slider");
         settings_input = neutral();
         settings_input.keyTab = true;
@@ -627,7 +667,7 @@ int main() {
         click.pointerDown = click.pointerPressed = false;
         click.pointerReleased = true;
         check(settings.frame(live, click, usage::ui::settings_width, usage::ui::settings_height).refresh, "Shared refresh requests updated usage");
-        check(settings.text_percent() == 300, "Usage refresh preserves pending appearance edits");
+        check(settings.text_percent() == 200, "Usage refresh preserves pending appearance edits");
         live.codex.installed = live.claude.installed = false;
         actual = settings.frame(live, neutral(), usage::ui::settings_width, usage::ui::settings_height);
         check(contains(actual.commands, "Not detected \xC2\xB7 Not updated yet") && settings.bounds("SaveSettings").height > 0,
@@ -690,7 +730,7 @@ int main() {
         for (int i = 0; i < actual.commands.length; ++i) {
             const auto& command = actual.commands.internalArray[i];
             if (command.commandType == CLAY_RENDER_COMMAND_TYPE_TEXT) {
-                check(command.renderData.text.fontId == usage::ui::regular_font, "Windows font reaches taskbar text");
+                check(command.renderData.text.fontId == usage::ui::bold_font, "Taskbar text defaults to the Windows font's bold face");
                 const auto value = command.renderData.text.stringContents;
                 check(std::string(value.chars, static_cast<std::size_t>(value.length)).find("reset ") ==
                           std::string::npos,
@@ -709,6 +749,7 @@ int main() {
             };
             auto bold = usage::Preferences{};
             bold.appearance.bold_taskbar = true;
+            bold.appearance.bold_hover = bold.appearance.bold_settings = false;
             widget.set_preferences(bold);
             hover.set_preferences(bold);
             check(uses(widget.frame(live, neutral(), 208, 38), usage::ui::bold_font) &&
@@ -732,7 +773,7 @@ int main() {
             settings.set_preferences(usage::Preferences{});
         }
         widget.set_preferences(usage::Preferences{});
-        widget.set_text_percent(140);
+        widget.set_text_percent(taskbar_text(140));
         auto large = widget.frame(data, neutral(), 292, 38);
         bool large_text = false;
         for (int i = 0; i < large.commands.length; ++i) {
@@ -743,7 +784,7 @@ int main() {
             }
         }
         check(large_text, "Text preference increases rendered font size");
-        widget.set_text_percent(100);
+        widget.set_text_percent(taskbar_text(100));
         auto overview = hover.frame(data, neutral(), 320, 250);
         check(contains(overview.commands, "38% used") && contains(overview.commands, "19% used"),
               "Hover shows used allowances");
