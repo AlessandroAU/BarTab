@@ -102,6 +102,10 @@ class App {
     UINT shell_hook_{};
     std::unordered_set<HWND> buttons_;
     bool track_button(HWND window);
+    // What the power notifications last said. Away (display off or session
+    // locked) stops every poll.
+    HPOWERNOTIFY display_notification_{};
+    bool display_on_{true}, locked_{}, away_{};
     std::wstring status_{L"Waiting for the taskbar."};
     bool smoke_{};
     bool demo_mode_{};
@@ -152,7 +156,13 @@ class App {
     void sync_secondary(const std::vector<Snapshot>& snapshots);
     const TaskbarWidget& active() const;
     void invalidate_widgets() const;
+    void update_theme();
     void tick();
+    // The update timer: takes provider readings and follows the taskbar layout.
+    bool start_timer();
+    void watch_power();
+    void power_changed(UINT event, LPARAM l);
+    void update_power();
     void paint_widget(HWND window);
     float popup_scale() const;
     void close_details();

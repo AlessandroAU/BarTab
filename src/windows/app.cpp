@@ -2,6 +2,7 @@
 #include "windows/platform.hpp"
 #include "windows/resource.h"
 #include "host/startup.hpp"
+#include <wtsapi32.h>
 #include <stdexcept>
 
 namespace usage::windows {
@@ -41,8 +42,12 @@ App::App(bool smoke, bool live_test, std::shared_ptr<host::MockProviders> mock)
     else
         shell_hook_ = 0;
     add_tray();
-    if (!SetTimer(controller_, 1, 500, nullptr))
+    update_theme();
+    if (!start_timer())
         throw std::runtime_error("Could not create update timer");
+    // Smoke tests run on the fixed timer whatever the machine's power state.
+    if (!smoke && !live_test)
+        watch_power();
     log(L"Started native prototype; PID " + std::to_wstring(GetCurrentProcessId()));
 }
 
@@ -92,6 +97,9 @@ App::~App() {
         KillTimer(controller_, 1);
         if (shell_hook_)
             DeregisterShellHookWindow(controller_);
+        if (display_notification_)
+            UnregisterPowerSettingNotification(display_notification_);
+        WTSUnRegisterSessionNotification(controller_);
     }
     Shell_NotifyIconW(NIM_DELETE, &tray_);
     if (popup_)
@@ -153,15 +161,28 @@ LRESULT CALLBACK App::controller_proc(HWND window, UINT message, WPARAM w, LPARA
                 app->reader_.poke();
             return 0;
         }
+        if (message == WM_POWERBROADCAST) {
+            app->power_changed(static_cast<UINT>(w), l);
+            return TRUE;
+        }
+        if (message == WM_WTSSESSION_CHANGE) {
+            if (w == WTS_SESSION_LOCK || w == WTS_SESSION_UNLOCK) {
+                app->locked_ = w == WTS_SESSION_LOCK;
+                app->update_power();
+            }
+            return 0;
+        }
         if (message == WM_DISPLAYCHANGE || message == WM_DPICHANGED) {
             app->reader_.poke();
             return DefWindowProcW(window, message, w, l);
         }
-        if (message == WM_SETTINGCHANGE || message == WM_THEMECHANGED || message == WM_SYSCOLORCHANGE) {
+        if (message == WM_SETTINGCHANGE || message == WM_THEMECHANGED || message == WM_SYSCOLORCHANGE ||
+            message == WM_DWMCOLORIZATIONCOLORCHANGED) {
             // Taskbar alignment and its search box and widgets buttons arrive here too.
             app->reader_.poke();
             app->update_system_font();
             app->update_animation_preference();
+            app->update_theme();
             app->tick();
             app->invalidate_widgets();
             return 0;
@@ -276,6 +297,53 @@ bool App::track_button(HWND window) {
     if (button)
         buttons_.insert(window);
     return button;
+}
+
+// The display notification reports the current state on registering; each
+// later change arrives as a message.
+void App::watch_power() {
+    display_notification_ =
+        RegisterPowerSettingNotification(controller_, &GUID_CONSOLE_DISPLAY_STATE, DEVICE_NOTIFY_WINDOW_HANDLE);
+    WTSRegisterSessionNotification(controller_, NOTIFY_FOR_THIS_SESSION);
+    update_power();
+}
+
+void App::power_changed(UINT event, LPARAM l) {
+    if (event == PBT_POWERSETTINGCHANGE) {
+        const auto* setting = reinterpret_cast<const POWERBROADCAST_SETTING*>(l);
+        // 0 is off, 1 on, 2 dimmed; a dimmed display is still being looked at.
+        if (setting && setting->PowerSetting == GUID_CONSOLE_DISPLAY_STATE && setting->DataLength >= sizeof(DWORD))
+            display_on_ = *reinterpret_cast<const DWORD*>(setting->Data) != 0;
+    }
+    // Waking from sleep: whatever was read before it is out of date.
+    if (event == PBT_APMRESUMEAUTOMATIC) {
+        providers_.refresh();
+        reader_.poke();
+    }
+    if (event == PBT_POWERSETTINGCHANGE)
+        update_power();
+}
+
+void App::update_power() {
+    const bool away = !display_on_ || locked_;
+    if (away == away_)
+        return;
+    away_ = away;
+    log(away ? L"Away: polling paused" : L"Back: polling resumed");
+    providers_.set_power(away ? host::PowerMode::Away : host::PowerMode::Normal);
+    reader_.set_paused(away);
+    // Nothing changes while away, so the update timer stops too. Its first tick
+    // back comes after the taskbar reader, just resumed, has read a fresh layout.
+    if (away)
+        KillTimer(controller_, 1);
+    else if (!start_timer())
+        log(L"Could not restart the update timer.");
+}
+
+// Nothing here needs to be on time to the millisecond, so Windows may batch
+// its wake-ups with other timers'.
+bool App::start_timer() {
+    return SetCoalescableTimer(controller_, 1, 500, nullptr, 250) != 0;
 }
 
 void App::mock_changed() {

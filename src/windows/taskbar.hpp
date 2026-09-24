@@ -40,6 +40,8 @@ class TaskbarReader {
     // Something that may move taskbar buttons happened, such as a window
     // opening: read shortly, and again once the taskbar has animated.
     void poke();
+    // Stops reading while nobody can see the widget, and reads at once on return.
+    void set_paused(bool value);
 
   private:
     struct State;

@@ -370,7 +370,9 @@ void App::hide_widget() {
     primary_.bounds = {};
 }
 
-void App::tick() {
+// Reads the theme and accent. Windows announces changes to both, so this runs
+// on those messages rather than on every tick.
+void App::update_theme() {
     const bool app_light = apps_light_theme();
     const auto os_accent = system_accent();
     const bool details_light_changed = details_view_.set_system_light(app_light);
@@ -385,6 +387,9 @@ void App::tick() {
         invalidate_widgets();
     if (widget_view_.set_system_light(system_light_theme()))
         invalidate_widgets();
+}
+
+void App::tick() {
     const auto taskbars = reader_.latest();
     const auto& snapshot = taskbars.primary;
     const auto now = std::chrono::steady_clock::now();

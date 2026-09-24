@@ -36,6 +36,10 @@ inline std::string mock_path(Service service) {
     return service == Service::Claude ? "mock://claude" : "mock://codex";
 }
 
+// Away, while nobody can see the result (display off, session locked), the
+// readers stop, and catch up as soon as someone can.
+enum class PowerMode { Normal, Away };
+
 class UsageReader {
   public:
     // With `mock`, readings come from the mock endpoint instead of the CLI.
@@ -44,6 +48,7 @@ class UsageReader {
     ~UsageReader();
     void refresh();
     void set_interval(int seconds);
+    void set_power(PowerMode mode);
     bool take(AccountUsage& result);
 
   private:
@@ -55,8 +60,9 @@ class UsageReader {
     std::mutex mutex_;
     std::condition_variable wake_;
     std::atomic<bool> stop_{false};
-    bool requested_{true}, changed_{}, interval_changed_{};
+    bool requested_{true}, changed_{}, schedule_changed_{};
     int interval_seconds_{60};
+    PowerMode power_{PowerMode::Normal};
     AccountUsage latest_;
     std::thread worker_;
 };
@@ -76,6 +82,8 @@ class ProviderSession {
     void apply(const Preferences& preferences);
     // Asks every running reader for a fresh reading now.
     void refresh();
+    // Applies to the running readers and to any started later.
+    void set_power(PowerMode mode);
     struct Update {
         bool changed{};
         // An allowance window reset between two readings: worth a celebration.
@@ -91,6 +99,7 @@ class ProviderSession {
     Usage& usage_;
     std::shared_ptr<MockProviders> mock_;
     bool demo_;
+    PowerMode power_{PowerMode::Normal};
     std::unique_ptr<UsageReader> codex_, claude_;
 };
 } // namespace usage::host

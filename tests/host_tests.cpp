@@ -54,11 +54,30 @@ void session_tests() {
     check(recovered.changed && recovered.reset,
           "Allowance growing back past its reset time counts as a reset");
 
+    session.set_power(host::PowerMode::Away);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    check(!session.poll().changed, "Nothing is read while away");
+    session.refresh();
+    check(wait(session).changed, "An explicit refresh still reads while away");
+    session.set_power(host::PowerMode::Normal);
+
     usage.codex_enabled = false;
     session.apply(preferences);
     session.refresh();
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     check(!session.poll().changed, "A disabled provider stops polling");
+
+    {
+        // A reader waiting with no deadline must still stop when destroyed.
+        Usage away;
+        away.live = true;
+        away.codex_enabled = true;
+        host::ProviderSession paused(away, mock, false);
+        paused.detect();
+        paused.set_power(host::PowerMode::Away);
+        paused.apply(preferences);
+        check(wait(paused).changed, "A reader started while away still takes its first reading");
+    }
 
     Usage demo;
     host::ProviderSession fixed(demo, mock, true);

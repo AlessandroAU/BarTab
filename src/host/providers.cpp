@@ -23,13 +23,26 @@ void UsageReader::set_interval(int seconds) {
     if (interval_seconds_ == seconds)
         return;
     interval_seconds_ = seconds;
-    interval_changed_ = true;
+    schedule_changed_ = true;
+    wake_.notify_all();
+}
+void UsageReader::set_power(PowerMode mode) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (power_ == mode)
+        return;
+    power_ = mode;
+    schedule_changed_ = true;
     wake_.notify_all();
 }
 UsageReader::UsageReader(Service service, AccountUsage initial, std::shared_ptr<const MockProviders> mock)
     : service_(service), mock_(std::move(mock)), latest_(std::move(initial)), worker_([this] { run(); }) {}
 UsageReader::~UsageReader() {
-    stop_ = true;
+    {
+        // Under the lock, or the worker could check stop_ just before it is set
+        // and then sleep through the notification; paused, it would never wake.
+        std::lock_guard<std::mutex> lock(mutex_);
+        stop_ = true;
+    }
     wake_.notify_all();
     if (worker_.joinable())
         worker_.join();
@@ -98,11 +111,19 @@ void UsageReader::run() {
             changed_ = true;
         }
         std::unique_lock<std::mutex> lock(mutex_);
+        // The next reading is due one interval after this one; a change of
+        // interval moves that without restarting the wait.
+        const auto read_at = std::chrono::steady_clock::now();
         while (!stop_ && !requested_) {
-            interval_changed_ = false;
-            if (!wake_.wait_for(lock, std::chrono::seconds(interval_seconds_),
-                                [this] { return stop_ || requested_ || interval_changed_; }))
+            const auto due = read_at + std::chrono::seconds(interval_seconds_);
+            if (power_ != PowerMode::Away && std::chrono::steady_clock::now() >= due)
                 break;
+            schedule_changed_ = false;
+            const auto woken = [this] { return stop_ || requested_ || schedule_changed_; };
+            if (power_ == PowerMode::Away)
+                wake_.wait(lock, woken);
+            else
+                wake_.wait_until(lock, due, woken);
         }
     }
 }
@@ -129,12 +150,14 @@ void ProviderSession::apply(const Preferences& preferences) {
         if (!codex_)
             codex_ = std::make_unique<UsageReader>(Service::Codex, usage_.codex, mock_);
         codex_->set_interval(preferences.codex_interval);
+        codex_->set_power(power_);
     } else
         codex_.reset();
     if (usage_.claude_enabled) {
         if (!claude_)
             claude_ = std::make_unique<UsageReader>(Service::Claude, usage_.claude, mock_);
         claude_->set_interval(preferences.claude_interval);
+        claude_->set_power(power_);
     } else
         claude_.reset();
 }
@@ -143,6 +166,13 @@ void ProviderSession::refresh() {
         codex_->refresh();
     if (claude_)
         claude_->refresh();
+}
+void ProviderSession::set_power(PowerMode mode) {
+    power_ = mode;
+    if (codex_)
+        codex_->set_power(mode);
+    if (claude_)
+        claude_->set_power(mode);
 }
 ProviderSession::Update ProviderSession::poll(std::int64_t now) {
     const auto codex_before = usage_.codex;

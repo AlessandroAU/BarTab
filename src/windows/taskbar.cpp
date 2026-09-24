@@ -101,7 +101,7 @@ struct TaskbarReader::State {
     std::condition_variable wake;
     bool stop{};
     bool secondary{};
-    bool poked{};
+    bool poked{}, paused{};
     Taskbars snapshot;
 };
 TaskbarReader::TaskbarReader() : state_(std::make_shared<State>()) {
@@ -151,7 +151,11 @@ TaskbarReader::TaskbarReader() : state_(std::make_shared<State>()) {
                 state->snapshot = std::move(snapshot);
                 const auto wait = settling ? std::chrono::steady_clock::duration(settled_read) : gap;
                 settling = false;
-                state->wake.wait_for(lock, wait, [&] { return state->stop || state->poked; });
+                const auto woken = [&] { return state->stop || state->poked; };
+                if (state->paused)
+                    state->wake.wait(lock, woken);
+                else
+                    state->wake.wait_for(lock, wait, woken);
                 if (state->poked) {
                     state->wake.wait_for(lock, poke_delay, [&] { return state->stop; });
                     state->poked = false;
@@ -183,6 +187,16 @@ void TaskbarReader::set_secondary(bool value) {
         state_->secondary = value;
     }
     poke();
+}
+void TaskbarReader::set_paused(bool value) {
+    {
+        std::lock_guard<std::mutex> lock(state_->mutex);
+        if (state_->paused == value)
+            return;
+        state_->paused = value;
+    }
+    if (!value)
+        poke();
 }
 void TaskbarReader::poke() {
     {
