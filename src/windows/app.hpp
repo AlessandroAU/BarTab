@@ -7,6 +7,7 @@
 #include <shellapi.h>
 #include <filesystem>
 #include <functional>
+#include <unordered_set>
 
 namespace usage::windows {
 inline constexpr UINT tray_message = WM_APP + 1;
@@ -95,6 +96,12 @@ class App {
     HWND active_widget_{};
     NOTIFYICONDATAW tray_{};
     UINT taskbar_created_{};
+    // Explorer's shell hook: top-level windows coming and going move taskbar
+    // buttons. `buttons_` holds the windows that have one, so that a destroyed
+    // window, which can no longer be inspected, pokes only if it had a button.
+    UINT shell_hook_{};
+    std::unordered_set<HWND> buttons_;
+    bool track_button(HWND window);
     std::wstring status_{L"Waiting for the taskbar."};
     bool smoke_{};
     bool demo_mode_{};

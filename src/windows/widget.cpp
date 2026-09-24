@@ -343,7 +343,7 @@ void App::sync_secondary(const std::vector<Snapshot>& snapshots) {
     for (const auto& snapshot : snapshots) {
         auto found = std::find_if(secondary_.begin(), secondary_.end(),
                                   [&](const TaskbarWidget& widget) { return widget.taskbar == snapshot.taskbar; });
-        const bool fresh = snapshot.error.empty() && now - snapshot.captured <= std::chrono::seconds(5);
+        const bool fresh = snapshot.error.empty() && now - snapshot.captured <= taskbar_stale_after;
         if (found == secondary_.end()) {
             if (!fresh)
                 continue;
@@ -394,7 +394,7 @@ void App::tick() {
     if (!snapshot.error.empty() || snapshot.taskbar != current || !current) {
         hide_widget();
         set_status(snapshot.error.empty() ? L"Waiting for the Windows taskbar." : snapshot.error);
-    } else if (now - snapshot.captured > std::chrono::seconds(5)) {
+    } else if (now - snapshot.captured > taskbar_stale_after) {
         hide_widget();
         set_status(L"Taskbar layout is stale. Waiting for Explorer.");
     } else {

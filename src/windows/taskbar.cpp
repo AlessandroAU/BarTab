@@ -3,6 +3,7 @@
 #include <oleauto.h>
 #include <UIAutomation.h>
 #include <wrl/client.h>
+#include <algorithm>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
@@ -73,6 +74,26 @@ Snapshot read_snapshot(IUIAutomation* automation, HWND taskbar, bool buttons_exp
         result.error.clear();
     return result;
 }
+
+// Whether two reads found the same layout; only then may reading slow down.
+bool same_layout(const Snapshot& a, const Snapshot& b) {
+    return a.taskbar == b.taskbar && a.bounds == b.bounds && a.dpi == b.dpi && a.occupied == b.occupied &&
+           a.error == b.error;
+}
+bool same_layout(const Taskbars& a, const Taskbars& b) {
+    return same_layout(a.primary, b.primary) &&
+           std::equal(a.secondary.begin(), a.secondary.end(), b.secondary.begin(), b.secondary.end(),
+                      [](const Snapshot& x, const Snapshot& y) { return same_layout(x, y); });
+}
+// Each walk is a few dozen cross-process calls into Explorer, so a layout that
+// holds still is read less and less often. A poke reads after a short pause,
+// which folds a burst of pokes into one read, and once more when the taskbar's
+// own button animation has settled. Pokes are frequent (the shell reports
+// every top-level window, most of which never reach the taskbar), so each one
+// must stay cheap.
+constexpr auto quickest_read = std::chrono::seconds(1);
+constexpr auto poke_delay = std::chrono::milliseconds(250);
+constexpr auto settled_read = std::chrono::seconds(1);
 } // namespace
 
 struct TaskbarReader::State {
@@ -80,6 +101,7 @@ struct TaskbarReader::State {
     std::condition_variable wake;
     bool stop{};
     bool secondary{};
+    bool poked{};
     Taskbars snapshot;
 };
 TaskbarReader::TaskbarReader() : state_(std::make_shared<State>()) {
@@ -91,6 +113,8 @@ TaskbarReader::TaskbarReader() : state_(std::make_shared<State>()) {
             return;
         {
             ComPtr<IUIAutomation> automation;
+            std::chrono::steady_clock::duration gap = quickest_read;
+            bool settling{};
             while (true) {
                 {
                     std::lock_guard<std::mutex> lock(state->mutex);
@@ -120,8 +144,20 @@ TaskbarReader::TaskbarReader() : state_(std::make_shared<State>()) {
                 for (auto& other : snapshot.secondary)
                     other.captured = now;
                 std::unique_lock<std::mutex> lock(state->mutex);
+                // An unreadable or moving layout keeps the quick pace.
+                gap = snapshot.primary.error.empty() && same_layout(snapshot, state->snapshot)
+                          ? std::min<std::chrono::steady_clock::duration>(gap * 2, taskbar_slowest_read)
+                          : quickest_read;
                 state->snapshot = std::move(snapshot);
-                if (state->wake.wait_for(lock, std::chrono::seconds(1), [&] { return state->stop; }))
+                const auto wait = settling ? std::chrono::steady_clock::duration(settled_read) : gap;
+                settling = false;
+                state->wake.wait_for(lock, wait, [&] { return state->stop || state->poked; });
+                if (state->poked) {
+                    state->wake.wait_for(lock, poke_delay, [&] { return state->stop; });
+                    state->poked = false;
+                    settling = true;
+                }
+                if (state->stop)
                     break;
             }
         }
@@ -140,7 +176,19 @@ Taskbars TaskbarReader::latest() const {
     return state_->snapshot;
 }
 void TaskbarReader::set_secondary(bool value) {
-    std::lock_guard<std::mutex> lock(state_->mutex);
-    state_->secondary = value;
+    {
+        std::lock_guard<std::mutex> lock(state_->mutex);
+        if (state_->secondary == value)
+            return;
+        state_->secondary = value;
+    }
+    poke();
+}
+void TaskbarReader::poke() {
+    {
+        std::lock_guard<std::mutex> lock(state_->mutex);
+        state_->poked = true;
+    }
+    state_->wake.notify_all();
 }
 } // namespace usage::windows

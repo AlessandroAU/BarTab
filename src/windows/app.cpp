@@ -30,6 +30,16 @@ App::App(bool smoke, bool live_test, std::shared_ptr<host::MockProviders> mock)
         apply_providers();
     }
     taskbar_created_ = RegisterWindowMessageW(L"TaskbarCreated");
+    shell_hook_ = RegisterWindowMessageW(L"SHELLHOOK");
+    if (RegisterShellHookWindow(controller_))
+        EnumWindows(
+            [](HWND window, LPARAM app) {
+                reinterpret_cast<App*>(app)->track_button(window);
+                return TRUE;
+            },
+            reinterpret_cast<LPARAM>(this));
+    else
+        shell_hook_ = 0;
     add_tray();
     if (!SetTimer(controller_, 1, 500, nullptr))
         throw std::runtime_error("Could not create update timer");
@@ -78,8 +88,11 @@ void App::update_animation_preference() {
 }
 
 App::~App() {
-    if (controller_)
+    if (controller_) {
         KillTimer(controller_, 1);
+        if (shell_hook_)
+            DeregisterShellHookWindow(controller_);
+    }
     Shell_NotifyIconW(NIM_DELETE, &tray_);
     if (popup_)
         DestroyWindow(popup_);
@@ -130,7 +143,23 @@ App* App::instance(HWND window, UINT message, LPARAM parameter) {
 LRESULT CALLBACK App::controller_proc(HWND window, UINT message, WPARAM w, LPARAM l) {
     auto* app = instance(window, message, l);
     if (app) {
+        if (app->shell_hook_ && message == app->shell_hook_) {
+            // Activation and redraw notices leave the buttons where they are, and
+            // most windows the shell reports never get a button at all.
+            const auto code = w & 0x7fff;
+            const auto target = reinterpret_cast<HWND>(l);
+            if ((code == HSHELL_WINDOWCREATED && app->track_button(target)) ||
+                (code == HSHELL_WINDOWDESTROYED && app->buttons_.erase(target)) || code == HSHELL_WINDOWREPLACED)
+                app->reader_.poke();
+            return 0;
+        }
+        if (message == WM_DISPLAYCHANGE || message == WM_DPICHANGED) {
+            app->reader_.poke();
+            return DefWindowProcW(window, message, w, l);
+        }
         if (message == WM_SETTINGCHANGE || message == WM_THEMECHANGED || message == WM_SYSCOLORCHANGE) {
+            // Taskbar alignment and its search box and widgets buttons arrive here too.
+            app->reader_.poke();
             app->update_system_font();
             app->update_animation_preference();
             app->tick();
@@ -160,6 +189,7 @@ LRESULT CALLBACK App::controller_proc(HWND window, UINT message, WPARAM w, LPARA
         if (app->taskbar_created_ && message == app->taskbar_created_) {
             app->reset_widget();
             app->add_tray();
+            app->reader_.poke();
             return 0;
         }
         if (message == tray_message) {
@@ -232,6 +262,20 @@ void App::frame() {
     if (!hover && !details && !confetti)
         frames_->stop();
     frames_->frame_done();
+}
+
+// Explorer's rule for which top-level windows get a taskbar button. Only those
+// can move the buttons, so only they are remembered and only they poke the
+// reader; the shell reports every other window too, and most are invisible.
+bool App::track_button(HWND window) {
+    if (!IsWindowVisible(window))
+        return false;
+    const auto extended = GetWindowLongPtrW(window, GWL_EXSTYLE);
+    const bool button = (extended & WS_EX_APPWINDOW) ||
+                        (!GetWindow(window, GW_OWNER) && !(extended & WS_EX_TOOLWINDOW));
+    if (button)
+        buttons_.insert(window);
+    return button;
 }
 
 void App::mock_changed() {
