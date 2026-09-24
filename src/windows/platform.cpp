@@ -95,7 +95,7 @@ std::filesystem::path config_directory() {
 }
 std::filesystem::path log_path() {
     const auto directory = config_directory();
-    return directory.empty() ? directory : directory / L"prototype.log";
+    return directory.empty() ? directory : directory / L"bartab.log";
 }
 } // namespace usage::host
 

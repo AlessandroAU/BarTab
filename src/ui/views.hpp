@@ -174,6 +174,10 @@ class View {
   private:
     std::string date(std::int64_t timestamp) const;
     std::string hover_reset(std::int64_t timestamp, std::int64_t now) const;
+    // The hover card's wording without "Resets", which the taskbar's reset
+    // column implies: "in 2h 14m", "Mon, 18:14". A reset that is unknown or
+    // overdue keeps its explicit wording.
+    std::string taskbar_reset(std::int64_t timestamp, std::int64_t now) const;
     std::string reset_time(std::int64_t timestamp, bool date_only = false, bool day_key = false) const;
     // A taskbar reset label: a 5 hour session resets within hours, so its time
     // of day, or nothing while idle; any other window its date (with the time

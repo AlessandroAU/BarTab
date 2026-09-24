@@ -142,7 +142,7 @@ Get-Content .\bin\smoke-test.txt
 
 It uses an isolated `smoke-settings.ini`, stays offline, writes diagnostic bitmaps beside the executable, and exits after about eight seconds. It does not restart Explorer or change Windows settings. `--live-smoke-test` is the online variant against real signed-in providers, reporting to `bin/codex-live-test.txt`.
 
-Logs: `%LOCALAPPDATA%\BarTab\prototype.log` on Windows and `~/.local/state/BarTab/bartab.log` on Linux, capped at 1 MB (the oldest half is dropped when it fills). Linux settings live in `~/.config/BarTab/`. Tested on Windows 11 build 26200 at 100% scaling with MSVC 19.44, and on Debian 13 (GCC 14, GNOME 48 on Wayland through XWayland) for the Linux host.
+Logs: `%LOCALAPPDATA%\BarTab\bartab.log` on Windows and `~/.local/state/BarTab/bartab.log` on Linux, capped at 1 MB (the oldest half is dropped when it fills). Linux settings live in `~/.config/BarTab/`. Tested on Windows 11 build 26200 at 100% scaling with MSVC 19.44, and on Debian 13 (GCC 14, GNOME 48 on Wayland through XWayland) for the Linux host.
 
 ### Mock providers (debug build)
 

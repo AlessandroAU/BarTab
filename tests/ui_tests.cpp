@@ -190,10 +190,11 @@ int main() {
             auto frame = split.frame(account, neutral(), 400, 38);
             check(contains(frame.commands, "5h") && contains(frame.commands, "Week") &&
                       contains(frame.commands, "76%") && contains(frame.commands, "51%") &&
-                      contains(frame.commands, "Resets in 2h 14m"), "Codex split labels both reported windows and resets");
+                      contains(frame.commands, "in 2h 14m") && !contains(frame.commands, "Resets in 2h 14m"),
+                  "Codex split labels both reported windows and resets, without the implied \"Resets\"");
             frame = split.frame(account, neutral(), 150, 38);
             check(split.bounds("Codex5hTrack").width > 0 && split.bounds("CodexWeeklyTrack").width > 0 &&
-                      !contains(frame.commands, "Resets in 2h 14m"), "Narrow Codex split keeps both bars and omits resets");
+                      !contains(frame.commands, "in 2h 14m"), "Narrow Codex split keeps both bars and omits resets");
             account.codex.windows.pop_back();
             frame = split.frame(account, neutral(), 208, 38);
             check(split.bounds("CodexSplit").width == 0 && split.bounds("CodexTrack").width > 0,
@@ -323,8 +324,9 @@ int main() {
             widget.set_reference_time(1790000000);
             single.codex.windows[0].resets_at = 1790008040;
             auto reset_frame = widget.frame(single, neutral(), 208, 38);
-            check(contains(reset_frame.commands, "Weekly") && contains(reset_frame.commands, "Resets in 2h 14m"),
-                  "Codex-only reset line uses the same descriptive wording as the hover card");
+            check(contains(reset_frame.commands, "Weekly") && contains(reset_frame.commands, "in 2h 14m") &&
+                      !contains(reset_frame.commands, "Resets in 2h 14m"),
+                  "Codex-only reset line uses the hover card's wording without the implied \"Resets\"");
             const auto row = widget.bounds("CodexOnly");
             const auto subtitle = widget.bounds("CodexReset");
             check(std::abs(subtitle.x - row.x) < 0.5f && std::abs(subtitle.width - row.width) < 0.5f,

@@ -126,6 +126,13 @@ std::string View::window_reset(const Allowance& window, bool date_only) const {
         return reset_time(window.resets_at, date_only);
     return window.resets_at > 0 ? reset_time(window.resets_at).substr(6) : std::string{};
 }
+std::string View::taskbar_reset(std::int64_t timestamp, std::int64_t now) const {
+    auto text = hover_reset(timestamp, now);
+    constexpr std::string_view prefix = "Resets ";
+    if (text.compare(0, prefix.size(), prefix) == 0)
+        text.erase(0, prefix.size());
+    return text;
+}
 std::string View::reset_time(std::int64_t timestamp, bool date_only, bool day_key) const {
     return format_reset_time(timestamp, date_only, day_key, preferences_.appearance.twelve_hour_time);
 }
@@ -788,8 +795,8 @@ void View::codex_only_split(const AccountUsage& account, const Allowance& sessio
     widget_columns_ = {text_width("Week", 10, percent),
                        std::max(text_width(first.c_str(), 10, percent), text_width(second.c_str(), 10, percent))};
     const auto now = reference_time_ ? reference_time_ : static_cast<std::int64_t>(std::time(nullptr));
-    const auto first_reset = hover_reset(session.resets_at, now);
-    const auto second_reset = hover_reset(weekly.resets_at, now);
+    const auto first_reset = taskbar_reset(session.resets_at, now);
+    const auto second_reset = taskbar_reset(weekly.resets_at, now);
     const float reset_width = std::max(text_width(first_reset.c_str(), 9, percent),
                                        text_width(second_reset.c_str(), 9, percent));
     const float title_width = text_width(title, 10, percent);
@@ -1520,7 +1527,7 @@ void View::live_panel(const Usage& all, Frame& result, ClayWidgets_Input input) 
                      preferences_.appearance.show_resets) {
                 const int percent = std::min(preferences_.appearance.taskbar_text_scale(), 160);
                 const auto now = reference_time_ ? reference_time_ : static_cast<std::int64_t>(std::time(nullptr));
-                const auto reset = hover_reset(lowest->resets_at, now);
+                const auto reset = taskbar_reset(lowest->resets_at, now);
                 const auto title = account.error.empty() ? "Codex" : "Codex *";
                 // The subtitle spans the bar row: the window's name under the
                 // provider name, its reset ending under the percentage. It keeps
