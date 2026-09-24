@@ -3,6 +3,7 @@
 #include <oleauto.h>
 #include <UIAutomation.h>
 #include <wrl/client.h>
+#include "host/platform.hpp"
 #include <algorithm>
 #include <condition_variable>
 #include <mutex>
@@ -108,6 +109,7 @@ TaskbarReader::TaskbarReader() : state_(std::make_shared<State>()) {
     // Detached with shared ownership: a blocked third-party UIA provider must not
     // prevent Quit. The worker never references the App or posts to its HWNDs.
     std::thread([state = state_] {
+        host::background_thread();
         const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         if (FAILED(initialized))
             return;

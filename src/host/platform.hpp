@@ -23,6 +23,9 @@ bool apps_light_theme();
 // False when the user asked the system for reduced motion.
 bool animations_enabled();
 Color system_accent();
+// Marks the calling thread as background work the OS may run slowly and on
+// efficient cores: Windows' EcoQoS, macOS's utility class. Linux leaves it be.
+void background_thread();
 // A font file and the face in it to draw with: the face within a collection in
 // the low 16 bits, a variable font's named instance above them (fontconfig's
 // FC_INDEX encoding, which the renderer takes as is).

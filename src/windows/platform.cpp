@@ -33,6 +33,12 @@ Color system_accent() {
                 static_cast<std::uint8_t>(value)};
     return {0, 120, 212};
 }
+void background_thread() {
+    THREAD_POWER_THROTTLING_STATE state{THREAD_POWER_THROTTLING_CURRENT_VERSION,
+                                        THREAD_POWER_THROTTLING_EXECUTION_SPEED,
+                                        THREAD_POWER_THROTTLING_EXECUTION_SPEED};
+    SetThreadInformation(GetCurrentThread(), ThreadPowerThrottling, &state, sizeof(state));
+}
 FontFile ui_font(bool bold) {
     NONCLIENTMETRICSW metrics{};
     metrics.cbSize = sizeof(metrics);

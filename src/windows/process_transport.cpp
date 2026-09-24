@@ -79,7 +79,10 @@ struct ProcessTransport::Impl {
             command += L" " + quote(widen(argument));
         job.value = CreateJobObjectW(nullptr, nullptr);
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
-        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // The CLI and everything it starts run below normal priority: a usage
+        // check is never more urgent than what the user is doing.
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_PRIORITY_CLASS;
+        limits.BasicLimitInformation.PriorityClass = BELOW_NORMAL_PRIORITY_CLASS;
         if (!job.value ||
             !SetInformationJobObject(job.value, JobObjectExtendedLimitInformation, &limits, sizeof(limits)))
             throw std::runtime_error("Could not manage usage process");
@@ -92,6 +95,11 @@ struct ProcessTransport::Impl {
             TerminateProcess(process.value, 1);
             throw std::runtime_error("Could not manage usage process");
         }
+        // EcoQoS before it runs: efficient cores and low clocks for the whole check.
+        PROCESS_POWER_THROTTLING_STATE throttling{PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+                                                  PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+                                                  PROCESS_POWER_THROTTLING_EXECUTION_SPEED};
+        SetProcessInformation(process.value, ProcessPowerThrottling, &throttling, sizeof(throttling));
         ResumeThread(thread.value);
         CloseHandle(input_read.value);
         input_read.value = nullptr;

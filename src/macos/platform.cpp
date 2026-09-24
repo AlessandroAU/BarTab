@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iterator>
 #include <mach-o/dyld.h>
+#include <pthread/qos.h>
 
 namespace usage::host {
 namespace {
@@ -42,6 +43,9 @@ bool apps_light_theme() {
 }
 bool animations_enabled() {
     return true;
+}
+void background_thread() {
+    pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0);
 }
 Color system_accent() {
     return {0, 122, 255};

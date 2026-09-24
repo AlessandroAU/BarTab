@@ -1,5 +1,6 @@
 #include "host/providers.hpp"
 #include "host/process_transport.hpp"
+#include "host/platform.hpp"
 #include <exception>
 
 namespace usage::host {
@@ -94,6 +95,7 @@ AccountUsage UsageReader::read_mocked() {
     return result;
 }
 void UsageReader::run() {
+    background_thread();
     while (!stop_) {
         {
             std::lock_guard<std::mutex> lock(mutex_);

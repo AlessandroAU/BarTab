@@ -170,6 +170,7 @@ bool apps_light_theme() {
 bool animations_enabled() {
     return desktop().animations;
 }
+void background_thread() {}
 Color system_accent() {
     return desktop().accent;
 }
