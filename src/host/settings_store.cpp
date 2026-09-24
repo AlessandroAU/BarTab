@@ -23,6 +23,16 @@ constexpr AppearanceField appearance_fields[] = {
     {"WidgetWidth", &Appearance::widget_width},  {"HoverOpacity", &Appearance::hover_opacity},
     {"BarHeight", &Appearance::bar_height},      {"Position", &Appearance::position},
     {"WidgetHeight", &Appearance::widget_height}, {"WidgetOpacity", &Appearance::widget_opacity}};
+struct SwitchField {
+    const char* name;
+    bool Appearance::*member;
+};
+// Which taskbar bars show, and what each provider's measure.
+constexpr SwitchField bar_fields[] = {
+    {"CodexSession", &Appearance::codex_session_bar},   {"CodexWeekly", &Appearance::codex_weekly_bar},
+    {"ClaudeSession", &Appearance::claude_session_bar}, {"ClaudeWeekly", &Appearance::claude_weekly_bar},
+    {"ClaudeModel", &Appearance::claude_model_bar},     {"CodexShowUsed", &Appearance::codex_show_used},
+    {"ClaudeShowUsed", &Appearance::claude_show_used}};
 std::string lower(std::string value) {
     for (auto& c : value)
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -126,6 +136,8 @@ Preferences read_settings(const std::filesystem::path& path) {
     a.bold_taskbar = read("Appearance", "BoldTaskbar", bold < 0 ? a.bold_taskbar : bold) != 0;
     a.bold_hover = read("Appearance", "BoldHover", bold < 0 ? a.bold_hover : bold) != 0;
     a.bold_settings = read("Appearance", "BoldSettings", bold < 0 ? a.bold_settings : bold) != 0;
+    for (const auto& field : bar_fields)
+        a.*(field.member) = read("Bars", field.name, a.*(field.member)) != 0;
     value.codex_enabled = read("Providers", "Codex", value.codex_enabled) != 0;
     value.claude_enabled = read("Providers", "Claude", value.claude_enabled) != 0;
     value.codex_interval = read("Providers", "CodexInterval", value.codex_interval);
@@ -153,8 +165,10 @@ bool write_settings(const std::filesystem::path& path, Preferences value) {
              << "\nBoldSettings=" << value.appearance.bold_settings
              << "\nTwelveHourTime=" << value.appearance.twelve_hour_time
              << "\nHoverEnabled=" << value.appearance.hover_enabled
-             << "\nAllTaskbars=" << value.appearance.all_taskbars
-             << "\n[Providers]\nCodex=" << value.codex_enabled << "\nClaude=" << value.claude_enabled
+             << "\nAllTaskbars=" << value.appearance.all_taskbars << "\n[Bars]\n";
+        for (const auto& field : bar_fields)
+            file << field.name << '=' << value.appearance.*(field.member) << '\n';
+        file << "[Providers]\nCodex=" << value.codex_enabled << "\nClaude=" << value.claude_enabled
              << "\nCodexInterval=" << value.codex_interval << "\nClaudeInterval=" << value.claude_interval
              << '\n';
         file.close();

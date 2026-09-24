@@ -29,7 +29,7 @@ class MockPanel {
         HWND present{}, used{}, used_label{}, resets{}, resets_label{};
     };
     struct ProviderControls {
-        HWND state{}, plan{}, model_name{}, credits{}, earned_resets{};
+        HWND state{}, plan{}, model_name{}, session_shape{}, credits{}, earned_resets{};
         AllowanceControls allowances[3];
     };
     std::shared_ptr<host::MockProviders> providers_;

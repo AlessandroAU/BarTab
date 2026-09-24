@@ -15,6 +15,12 @@ enum class MockState {
     Connecting, // Installed, first reading still pending.
     Malformed,  // Answers the usage request with a reply the parser rejects.
 };
+// Claude only: how the reply reports the 5 hour window, since plans differ.
+enum class MockSessionShape {
+    Listed,     // In the normalized `limits` list and the legacy `five_hour` field (Max).
+    LegacyOnly, // Only in the legacy `five_hour` field, missing from `limits`.
+    Idle,       // Listed with a null percentage and reset: no session running.
+};
 struct MockAllowance {
     bool present{true};
     int used_percent{};
@@ -27,6 +33,7 @@ struct MockProvider {
     // Claude only: a model-scoped weekly window, "<model> weekly".
     MockAllowance model{false};
     std::string model_name{"Fable"};
+    MockSessionShape session_shape{MockSessionShape::Listed};
     // Codex only: account credits and earned rate-limit resets; empty or
     // negative leaves them out of the reply.
     std::string credit_balance;
@@ -42,6 +49,7 @@ struct MockPreset {
 // Every provider combination the UI lays out differently, first one default.
 const std::vector<MockPreset>& mock_presets();
 const char* mock_state_name(MockState state);
+const char* mock_session_shape_name(MockSessionShape shape);
 
 // Answers one request line the way the provider would, returning the reply
 // lines in order. `now` anchors the reset times.

@@ -148,8 +148,8 @@ Logs: `%LOCALAPPDATA%\BarTab\prototype.log` on Windows and `~/.local/state/BarTa
 
 `bin\BarTabDebug.exe` is the same app with the Codex and Claude CLIs replaced by mock endpoints, for trying every provider combination without the accounts to match. It opens a **Mock providers** window (reopen it from the tray menu) with:
 
-- **Scenario** presets: both providers, Codex only with 5 hour + weekly, weekly only or 5 hour only, Claude only with or without a model window, near the limits, a login error, a malformed reply, both connecting, and nothing installed.
-- Per provider: its state (Ready, Not installed, Login error, Connecting, Malformed reply), the plan, and for each allowance whether it is reported, how much is used, and when it resets. Codex also has credits and earned resets; Claude has the model-scoped window's name.
+- **Scenario** presets: both providers, Codex only with 5 hour + weekly, weekly only or 5 hour only, Claude only with or without a model window, Claude Pro with its 5 hour window only in the legacy field or idle, near the limits, a login error, a malformed reply, both connecting, and nothing installed.
+- Per provider: its state (Ready, Not installed, Login error, Connecting, Malformed reply), the plan, and for each allowance whether it is reported, how much is used, and when it resets. Codex also has credits and earned resets; Claude has the model-scoped window's name and how the reply carries the 5 hour window: in the normalized list (as for Max), only in the legacy `five_hour` field, or idle with a null percentage.
 
 Every change applies immediately. The mocks answer each CLI's real wire protocol, so readings still pass through the protocol handling, the parsers, the reader threads and their error handling. The debug build takes its own instance lock and saves to `debug-settings.ini`, so it can run beside the installed copy without touching its settings; the two widgets keep out of each other's way on the taskbar.
 

@@ -2,6 +2,7 @@
 #include "ui/confetti.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <ctime>
 #include <iostream>
 #include <stdexcept>
@@ -356,8 +357,17 @@ int main() {
         live.claude.windows = {{"5 hour", 97, 0}, {"Weekly", 44, 0}, {"Fable weekly", 23, 0}};
         actual = widget.frame(live, neutral(), 208, 38);
         check(contains(actual.commands, "Codex *") && contains(actual.commands, "Claude") &&
-                  contains(actual.commands, "85%") && contains(actual.commands, "44 / 23%"),
-              "Claude shows overall and Fable percentages separately");
+                  contains(actual.commands, "85%") && contains(actual.commands, "97%") &&
+                  !contains(actual.commands, "44%") && !contains(actual.commands, "23%"),
+              "The combined Claude row shows one percentage, the session's");
+        {
+            auto weekly_only = live;
+            weekly_only.claude.windows.erase(weekly_only.claude.windows.begin());
+            actual = widget.frame(weekly_only, neutral(), 208, 38);
+            check(contains(actual.commands, "23%") && !contains(actual.commands, "44%") &&
+                      widget.bounds("ClaudeSessionTrack").width <= 0,
+                  "Claude without a session shows only the weekly pair");
+        }
         auto resets = live;
         std::tm day{};
         day.tm_year = 126;
@@ -367,9 +377,21 @@ int main() {
         day.tm_isdst = -1;
         resets.claude.windows[1].resets_at = std::mktime(&day);
         resets.claude.windows[2].resets_at = resets.claude.windows[1].resets_at + 3600;
-        actual = widget.frame(resets, neutral(), 208, 38);
-        check(contains(actual.commands, "reset 25/09"),
-              "Claude merges resets on the same local day despite different times");
+        {
+            // Without a session the combined row's resets are the weekly pair's.
+            auto weekly_pair = resets;
+            weekly_pair.claude.windows.erase(weekly_pair.claude.windows.begin());
+            actual = widget.frame(weekly_pair, neutral(), 208, 38);
+            check(contains(actual.commands, "reset 25/09"),
+                  "Claude merges resets on the same local day despite different times");
+            // With one, the row follows the session: its time of day.
+            auto timed = resets;
+            timed.claude.windows[0].resets_at = resets.claude.windows[1].resets_at - 2 * 3600;
+            actual = widget.frame(timed, neutral(), 208, 38);
+            check(contains(actual.commands, "reset 10:00") || contains(actual.commands, "10:00"),
+                  "The combined Claude row's reset follows the session");
+            check(!contains(actual.commands, "reset 25/09"), "The session's reset replaces the weekly dates");
+        }
         resets.codex_enabled = false;
         for (int percent : {100, 150, 300}) {
             widget.set_text_percent(taskbar_text(percent));
@@ -385,12 +407,29 @@ int main() {
                 if (std::string(value.chars, static_cast<std::size_t>(value.length)).find("reset ") == 0)
                     ++reset_labels;
             }
-            check(reset_labels == 0 && contains(actual.commands, "25/09") &&
-                      contains(actual.commands, "12:00/13:00"),
-                  "Claude-only reset column shares the date and preserves both times");
-            check(std::abs(widget.bounds("ClaudeGeneralTrack").width -
-                           widget.bounds("ClaudeFableTrack").width) < 0.1f,
-                  "Claude-only tracks have equal widths");
+            check(reset_labels == 0 && contains(actual.commands, "25/09") && !contains(actual.commands, "25/09|"),
+                  "Claude-only weekly row shows one reset date");
+            // Stacked text shows all three bars; side by side keeps the weekly pair.
+            if (widget.bounds("ClaudeSessionTrack").width > 0) {
+                check(contains(actual.commands, "Session") && contains(actual.commands, "Weekly") &&
+                          contains(actual.commands, "97%") && contains(actual.commands, "44%") &&
+                          contains(actual.commands, "23%"),
+                      "Claude-only labels Session and Weekly and gives each bar its own percentage");
+                const auto session = widget.bounds("ClaudeSessionTrack"), general = widget.bounds("ClaudeGeneralTrack"),
+                           fable = widget.bounds("ClaudeFableTrack");
+                check(std::abs(session.x - general.x) < 0.1f && std::abs(general.x - fable.x) < 0.1f &&
+                          std::abs(session.width - general.width) < 0.1f &&
+                          std::abs(general.width - fable.width) < 0.1f && session.y < general.y && general.y < fable.y,
+                      "Claude-only stacks three aligned bars of equal width");
+            } else
+                check(percent > 100 && contains(actual.commands, "General") && contains(actual.commands, "Fable"),
+                      "Only large text puts the weekly pair side by side");
+            for (int i = 0; i < actual.commands.length; ++i) {
+                const auto& command = actual.commands.internalArray[i];
+                if (command.commandType == CLAY_RENDER_COMMAND_TYPE_TEXT)
+                    check(command.boundingBox.y >= 0 && command.boundingBox.y + command.boundingBox.height <= 38,
+                          "Claude-only session layout fits the taskbar height");
+            }
         }
         widget.set_preferences(baseline);
         resets.codex_enabled = true;
@@ -401,12 +440,26 @@ int main() {
             widget.set_preferences(combined);
             const auto size = usage::ui::widget_size(combined.appearance);
             widget.frame(resets, neutral(), size.width, size.height);
-            const auto weekly = widget.bounds("ClaudeWeeklyTrack"), fable = widget.bounds("ClaudeFableTrack");
-            const auto row = widget.bounds("Claude");
-            check(weekly.height >= 6 && fable.height == weekly.height,
-                  "Combined Claude tracks are one pixel thinner than the bar");
-            check(fable.y + fable.height <= row.y + row.height + 0.5f && weekly.y >= row.y - 0.5f,
+            const auto session = widget.bounds("ClaudeSessionTrack");
+            auto weekly = widget.bounds("ClaudeWeeklyTrack"), fable = widget.bounds("ClaudeFableTrack");
+            auto row = widget.bounds("Claude");
+            check(session.height >= 2 && weekly.height == session.height && fable.height == session.height &&
+                      session.y < weekly.y && weekly.y < fable.y,
+                  "Combined Claude stacks equal session, weekly and Fable tracks");
+            check(fable.y + fable.height <= row.y + row.height + 0.5f && session.y >= row.y - 0.5f,
                   "Combined Claude tracks stay within their row");
+            auto pair = resets;
+            pair.claude.windows.erase(pair.claude.windows.begin());
+            widget.frame(pair, neutral(), size.width, size.height);
+            weekly = widget.bounds("ClaudeWeeklyTrack");
+            fable = widget.bounds("ClaudeFableTrack");
+            row = widget.bounds("Claude");
+            check(weekly.height >= 6 && fable.height == weekly.height,
+                  "A combined Claude pair is one pixel thinner than the bar");
+            check(fable.y + fable.height <= row.y + row.height + 0.5f && weekly.y >= row.y - 0.5f,
+                  "A combined Claude pair stays within its row");
+            widget.frame(resets, neutral(), size.width, size.height);
+            weekly = widget.bounds("ClaudeWeeklyTrack");
             const auto codex_track = widget.bounds("CodexTrack");
             check(std::abs(codex_track.x - weekly.x) < 0.5f &&
                       std::abs(codex_track.x + codex_track.width - (weekly.x + weekly.width)) < 0.5f,
@@ -417,11 +470,60 @@ int main() {
             widget.frame(resets, neutral(), 208, 38);
             check(widget.bounds("ClaudeWeeklyTrack").height <= 4.5f,
                   "Small labels cap the combined track thickness");
+            // Stacked tracks come out equally thick, one device pixel apart when
+            // there are three, at every display scale; edges round as the renderer's do.
+            for (const float scale : {1.f, 1.25f, 1.5f, 1.75f, 2.f}) {
+                widget.set_pixel_scale(scale);
+                for (const int percent : {65, 100, 150}) {
+                    combined.appearance.text_percent = taskbar_text(percent);
+                    widget.set_preferences(combined);
+                    for (const bool codex : {true, false}) {
+                        auto stacked = resets;
+                        stacked.codex_enabled = codex;
+                        const auto frame = widget.frame(stacked, neutral(), 225, 38);
+                        const auto names = codex ? std::vector<const char*>{"ClaudeSessionTrack", "ClaudeWeeklyTrack",
+                                                                           "ClaudeFableTrack"}
+                                                 : std::vector<const char*>{"ClaudeSessionTrack", "ClaudeGeneralTrack",
+                                                                           "ClaudeFableTrack"};
+                        // The drawn boxes, as the renderer receives them.
+                        std::vector<std::pair<long, long>> edges;
+                        for (const auto* name : names) {
+                            const auto track = Clay_GetElementId({false, static_cast<int32_t>(std::strlen(name)), name}).id;
+                            for (int i = 0; i < frame.commands.length; ++i) {
+                                const auto& command = frame.commands.internalArray[i];
+                                if (command.id != track || command.commandType != CLAY_RENDER_COMMAND_TYPE_RECTANGLE)
+                                    continue;
+                                const auto& box = command.boundingBox;
+                                edges.push_back({std::lround(box.y * scale), std::lround((box.y + box.height) * scale)});
+                                // Its fill is drawn next and moves with it.
+                                const auto& fill = frame.commands.internalArray[i + 1].boundingBox;
+                                check(std::abs(fill.y - box.y) < 0.01f && std::abs(fill.height - box.height) < 0.01f,
+                                      "A track's fill moves with it");
+                                break;
+                            }
+                        }
+                        check(edges.size() == names.size(), "Every stacked Claude track is drawn");
+                        for (std::size_t k = 0; k < edges.size(); ++k) {
+                            check(edges[k].second - edges[k].first == edges[0].second - edges[0].first &&
+                                      edges[k].second > edges[k].first,
+                                  "Stacked Claude tracks have the same device thickness");
+                            if (k > 0 && codex)
+                                check(edges[k].first - edges[k - 1].second == 1,
+                                      "Three Claude tracks sit one device pixel apart");
+                        }
+                    }
+                }
+            }
+            widget.set_pixel_scale(1.f);
             widget.set_preferences(baseline);
         }
         resets.claude.windows[2].resets_at += 86400;
-        actual = widget.frame(resets, neutral(), 208, 38);
-        check(contains(actual.commands, "reset 25/09 / 26/09"), "Claude retains different reset dates");
+        {
+            auto weekly_pair = resets;
+            weekly_pair.claude.windows.erase(weekly_pair.claude.windows.begin());
+            actual = widget.frame(weekly_pair, neutral(), 208, 38);
+            check(contains(actual.commands, "reset 25/09 / 26/09"), "Claude retains different reset dates");
+        }
         for (const float width : {150.f, 225.f, 480.f}) {
             const float height = hover.hover_height(live, width);
             actual = hover.frame(live, neutral(), width, height);
@@ -479,12 +581,13 @@ int main() {
                     check(contains(actual.commands, "Codex *") == codex,
                           "Codex visibility follows preference");
                     if (claude && !codex) {
-                        check(contains(actual.commands, "General") && contains(actual.commands, "Fable"),
-                              "Claude-only labels both allowances");
-                        check(contains(actual.commands, "44%") && contains(actual.commands, "23%"),
-                              "Claude-only rows include separate percentages");
-                        check(widget.bounds("ClaudeGeneral").y < widget.bounds("ClaudeFable").y,
-                              "General and Fable have separate taskbar rows");
+                        check(contains(actual.commands, "Session") && contains(actual.commands, "Weekly"),
+                              "Claude-only labels the session and weekly rows");
+                        check(contains(actual.commands, "97%") && contains(actual.commands, "44%") &&
+                                  contains(actual.commands, "23%"),
+                              "Claude-only rows include the session and paired weekly percentages");
+                        check(widget.bounds("ClaudeSession").y < widget.bounds("ClaudeGeneral").y,
+                              "Session and weekly have separate taskbar rows");
                     }
                     if (!codex && !claude)
                         check(contains(actual.commands, "Providers disabled - open settings"),
@@ -614,9 +717,82 @@ int main() {
         hover.set_preferences(baseline);
         live.codex.installed = false;
         actual = widget.frame(live, neutral(), 208, 38);
-        check(!contains(actual.commands, "Codex *") && contains(actual.commands, "General") &&
-                  contains(actual.commands, "Fable"),
-              "Claude alone uses separate General and Fable rows");
+        check(!contains(actual.commands, "Codex *") && contains(actual.commands, "Session") &&
+                  contains(actual.commands, "44%") && contains(actual.commands, "23%"),
+              "Claude alone shows its session above the split weekly row");
+        {
+            // At the default text size the per-bar percentages take 12 px, the
+            // largest the 38 px taskbar's slots allow.
+            usage::ui::View standard(usage::ui::Surface::Widget, measure, nullptr);
+            usage::Preferences defaults;
+            standard.set_preferences(defaults);
+            const auto frame = standard.frame(live, neutral(), 225, 38);
+            bool found = false;
+            for (int i = 0; i < frame.commands.length; ++i) {
+                const auto& command = frame.commands.internalArray[i];
+                const auto& value = command.renderData.text.stringContents;
+                if (command.commandType == CLAY_RENDER_COMMAND_TYPE_TEXT &&
+                    std::string(value.chars, static_cast<std::size_t>(value.length)) == "44%")
+                    found = command.renderData.text.fontSize == 12;
+            }
+            check(found, "Per-bar percentages use the largest size the slots allow");
+        }
+        {
+            // Usage used flips every percentage and fill; the hover card follows.
+            usage::Preferences used = baseline;
+            used.appearance.claude_show_used = true;
+            widget.set_preferences(used);
+            actual = widget.frame(live, neutral(), 208, 38);
+            check(contains(actual.commands, "3%") && contains(actual.commands, "56%") &&
+                      contains(actual.commands, "77%") && !contains(actual.commands, "44%"),
+                  "Usage used shows what is spent");
+            auto with_codex = live;
+            with_codex.codex.installed = true;
+            actual = widget.frame(with_codex, neutral(), 208, 38);
+            // Claude's session is 3% used.
+            check(contains(actual.commands, "85%") && contains(actual.commands, "3%") &&
+                      !contains(actual.commands, "97%"),
+                  "Each provider keeps its own measure");
+            check(widget.bounds("ClaudeSessionTrack").width > 0, "The session bar is still drawn");
+            hover.set_preferences(used);
+            const auto hover_size = usage::ui::hover_size(live, used.appearance.hover_text_scale());
+            check(contains(hover.frame(live, neutral(), hover_size.width, hover_size.height).commands, "56%"),
+                  "The hover card shows usage used too");
+            hover.set_preferences(baseline);
+
+            // Switched-off bars leave the taskbar; a provider with none left steps aside.
+            usage::Preferences hidden = baseline;
+            hidden.appearance.claude_session_bar = false;
+            widget.set_preferences(hidden);
+            actual = widget.frame(live, neutral(), 208, 38);
+            check(!contains(actual.commands, "Session") && contains(actual.commands, "General") &&
+                      contains(actual.commands, "Fable"),
+                  "Hiding the session bar leaves General and Fable");
+            hidden.appearance.claude_model_bar = false;
+            widget.set_preferences(hidden);
+            actual = widget.frame(live, neutral(), 208, 38);
+            check(!contains(actual.commands, "Fable") && contains(actual.commands, "44%"),
+                  "Hiding the model bar leaves the weekly bar");
+            hidden.appearance.claude_weekly_bar = false;
+            widget.set_preferences(hidden);
+            actual = widget.frame(live, neutral(), 208, 38);
+            check(contains(actual.commands, "No bars selected - open settings"),
+                  "With every bar hidden the widget says where to turn them back on");
+            auto both = live;
+            both.codex.installed = true;
+            actual = widget.frame(both, neutral(), 208, 38);
+            check(contains(actual.commands, "Codex *") && !contains(actual.commands, "Claude"),
+                  "A provider with every bar hidden steps aside for the other");
+            widget.set_preferences(baseline);
+        }
+        {
+            // Without a session, Claude alone keeps separate General and Fable rows.
+            auto weekly_only = live;
+            weekly_only.claude.windows.erase(weekly_only.claude.windows.begin());
+            actual = widget.frame(weekly_only, neutral(), 208, 38);
+            check(contains(actual.commands, "General") && contains(actual.commands, "Fable"),
+                  "Claude alone uses separate General and Fable rows without a session");
+        }
         live.claude.installed = false;
         actual = widget.frame(live, neutral(), 208, 38);
         check(contains(actual.commands, "No supported installations detected"),

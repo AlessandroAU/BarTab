@@ -17,6 +17,17 @@ int main() {
             R"({"rate_limits_available":true,"rate_limits":{"five_hour":{"utilization":200},"seven_day":null,"model_scoped":[{"display_name":"Sonnet","utilization":-5}]}})");
         check(result.windows.size() == 2 && result.windows[0].remaining == 0 &&
               result.windows[1].remaining == 100 && result.windows[0].resets_at == 0);
+        // Normalized list without a session entry still picks up the legacy five_hour window, first.
+        result = usage::parse_claude_limits(
+            R"({"rate_limits_available":true,"rate_limits":{"limits":[{"kind":"weekly_all","percent":40}],"five_hour":{"utilization":25},"seven_day":{"utilization":90}}})");
+        check(result.windows.size() == 2 && result.windows[0].label == "5 hour" &&
+              result.windows[0].remaining == 75 && result.windows[1].label == "Weekly" &&
+              result.windows[1].remaining == 60);
+        // An idle session reports a null percentage, which means nothing used yet.
+        result = usage::parse_claude_limits(
+            R"({"rate_limits_available":true,"rate_limits":{"limits":[{"kind":"session","percent":null,"resets_at":null},{"kind":"weekly_all","percent":10}],"five_hour":null}})");
+        check(result.windows.size() == 2 && result.windows[0].label == "5 hour" &&
+              result.windows[0].remaining == 100 && result.windows[0].resets_at == 0);
         for (const char* invalid :
              {"{}", R"({"rate_limits_available":false})",
               R"({"rate_limits_available":true,"rate_limits":{"five_hour":{"utilization":"wrong"}}})"}) {

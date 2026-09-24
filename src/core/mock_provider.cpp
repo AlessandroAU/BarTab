@@ -87,21 +87,42 @@ std::vector<std::string> claude_answer(const MockProvider& provider, const Json&
                     .dump()};
     if (provider.state == MockState::Malformed)
         return {claude_success(id, {{"rate_limits_available", false}}).dump()};
+    // Like the real reply, the windows appear both in the normalized list and
+    // in the older per-window fields; the session shape varies between plans.
     Json limits = Json::array();
+    Json legacy{{"five_hour", nullptr}, {"seven_day", nullptr}, {"model_scoped", Json::array()}};
+    const auto reset = [&](const MockAllowance& allowance) {
+        return iso_time(now + std::int64_t{allowance.resets_in_minutes} * 60);
+    };
     const auto add = [&](const MockAllowance& allowance, const char* kind, Json extra = {}) {
         if (!allowance.present)
             return;
-        Json window{{"kind", kind},
-                    {"percent", allowance.used_percent},
-                    {"resets_at", iso_time(now + std::int64_t{allowance.resets_in_minutes} * 60)}};
+        Json window{{"kind", kind}, {"percent", allowance.used_percent}, {"resets_at", reset(allowance)}};
         if (!extra.is_null())
             window.update(extra);
         limits.push_back(std::move(window));
     };
-    add(provider.session, "session");
+    if (provider.session.present) {
+        const auto shape = provider.session_shape;
+        if (shape == MockSessionShape::Idle)
+            limits.push_back({{"kind", "session"}, {"percent", nullptr}, {"resets_at", nullptr}});
+        else {
+            if (shape == MockSessionShape::Listed)
+                add(provider.session, "session");
+            legacy["five_hour"] = {{"utilization", provider.session.used_percent},
+                                   {"resets_at", reset(provider.session)}};
+        }
+    }
     add(provider.weekly, "weekly_all");
     add(provider.model, "weekly_scoped", {{"scope", {{"model", {{"display_name", provider.model_name}}}}}});
-    Json usage{{"rate_limits_available", true}, {"rate_limits", {{"limits", limits}}}};
+    if (provider.weekly.present)
+        legacy["seven_day"] = {{"utilization", provider.weekly.used_percent}, {"resets_at", reset(provider.weekly)}};
+    if (provider.model.present)
+        legacy["model_scoped"].push_back({{"display_name", provider.model_name},
+                                          {"utilization", provider.model.used_percent},
+                                          {"resets_at", reset(provider.model)}});
+    legacy["limits"] = std::move(limits);
+    Json usage{{"rate_limits_available", true}, {"rate_limits", std::move(legacy)}};
     if (!provider.plan.empty())
         usage["subscription_type"] = provider.plan;
     return {claude_success(id, usage).dump()};
@@ -130,6 +151,12 @@ MockProvider claude(MockAllowance session, MockAllowance weekly, MockAllowance m
     result.model = model;
     return result;
 }
+MockProvider claude_pro(MockAllowance session, MockAllowance weekly, MockSessionShape shape) {
+    auto result = claude(session, weekly, absent);
+    result.plan = "pro";
+    result.session_shape = shape;
+    return result;
+}
 MockProvider with_state(MockProvider provider, MockState state) {
     provider.state = state;
     return provider;
@@ -147,6 +174,15 @@ const char* mock_state_name(MockState state) {
     return "";
 }
 
+const char* mock_session_shape_name(MockSessionShape shape) {
+    switch (shape) {
+    case MockSessionShape::Listed: return "Listed (Max)";
+    case MockSessionShape::LegacyOnly: return "Legacy field only";
+    case MockSessionShape::Idle: return "Idle (null percent)";
+    }
+    return "";
+}
+
 const std::vector<MockPreset>& mock_presets() {
     static const auto presets = [] {
         const auto codex_both = codex(used(38, 2 * hours + 14), used(19, 4 * days + 3 * hours));
@@ -158,8 +194,13 @@ const std::vector<MockPreset>& mock_presets() {
             {"Codex only: 5 hour + weekly", {codex_both, missing}},
             {"Codex only: weekly", {codex(absent, used(19, 4 * days)), missing}},
             {"Codex only: 5 hour", {codex(used(38, 2 * hours), absent), missing}},
-            {"Claude only: weekly + model", {missing, claude_all}},
+            {"Claude only: 5 hour + weekly + model", {missing, claude_all}},
             {"Claude only: 5 hour + weekly", {missing, claude(used(3, 4 * hours), used(56, 3 * days), absent)}},
+            {"Claude only: weekly + model", {missing, claude(absent, used(56, 3 * days), used(77, 5 * days))}},
+            {"Claude Pro: 5 hour only in legacy field",
+             {missing, claude_pro(used(42, 3 * hours), used(18, 5 * days), MockSessionShape::LegacyOnly)}},
+            {"Claude Pro: idle session (null percent)",
+             {missing, claude_pro(used(0, 0), used(18, 5 * days), MockSessionShape::Idle)}},
             {"Near the limits", {codex(used(97, 40), used(91, 26 * hours)),
                                  claude(used(99, 12), used(95, 20 * hours), used(100, 2 * days))}},
             {"Codex login error", {with_state(codex_both, MockState::LoginError), claude_all}},

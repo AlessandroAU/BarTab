@@ -12,13 +12,16 @@ namespace usage::windows {
 namespace {
 constexpr wchar_t panel_class[] = L"BarTab.MockPanel.Cpp";
 constexpr int preset_id = 900, reset_button_id = 910;
-constexpr int state_field = 1, plan_field = 2, model_name_field = 3, credits_field = 4, earned_field = 5;
+constexpr int state_field = 1, plan_field = 2, model_name_field = 3, credits_field = 4, earned_field = 5,
+              session_shape_field = 6;
 constexpr int present_field = 10, used_field = 11, resets_field = 12;
 constexpr MockState states[] = {MockState::Ready, MockState::Missing, MockState::LoginError, MockState::Connecting,
                                 MockState::Malformed};
+constexpr MockSessionShape session_shapes[] = {MockSessionShape::Listed, MockSessionShape::LegacyOnly,
+                                               MockSessionShape::Idle};
 // Layout, in DIPs.
 constexpr int margin = 16, column_width = 330, column_gap = 20;
-constexpr int client_width = margin * 2 + column_width * 2 + column_gap, client_height = 530;
+constexpr int client_width = margin * 2 + column_width * 2 + column_gap, client_height = 560;
 constexpr int allowance_top = 144, allowance_step = 86;
 
 int control_id(int provider, int field, int allowance = 0) {
@@ -206,6 +209,13 @@ void MockPanel::build_provider(int index, int left) {
         add(WC_STATICW, L"Model", SS_LEFT, {left + 12, y + 3, left + 88, y + 23});
         controls.model_name = add(WC_EDITW, L"", ES_AUTOHSCROLL | WS_TABSTOP, {left + 90, y, right - 12, y + 23},
                                   control_id(index, model_name_field));
+        // How the reply carries the 5 hour window; Pro accounts differ from Max.
+        add(WC_STATICW, L"5 hour sent", SS_LEFT, {left + 12, y + 36, left + 88, y + 56});
+        controls.session_shape = add(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+                                     {left + 90, y + 33, right - 12, y + 150}, control_id(index, session_shape_field));
+        for (const auto shape : session_shapes)
+            SendMessageW(controls.session_shape, CB_ADDSTRING, 0,
+                         reinterpret_cast<LPARAM>(widen(mock_session_shape_name(shape)).c_str()));
         return;
     }
     add(WC_STATICW, L"Credits", SS_LEFT, {left + 12, y + 3, left + 88, y + 23});
@@ -250,6 +260,9 @@ void MockPanel::show_scenario(const MockScenario& scenario) {
                 SendMessageW(controls.state, CB_SETCURSEL, static_cast<WPARAM>(s), 0);
         set_text(controls.plan, widen(provider.plan));
         set_text(controls.model_name, widen(provider.model_name));
+        for (int s = 0; controls.session_shape && s < static_cast<int>(std::size(session_shapes)); ++s)
+            if (session_shapes[s] == provider.session_shape)
+                SendMessageW(controls.session_shape, CB_SETCURSEL, static_cast<WPARAM>(s), 0);
         set_text(controls.credits, widen(provider.credit_balance));
         set_text(controls.earned_resets,
                  provider.available_resets >= 0 ? std::to_wstring(provider.available_resets) : L"");
@@ -278,6 +291,11 @@ MockScenario MockPanel::read_scenario() const {
         provider.plan = narrow(window_text(controls.plan));
         if (controls.model_name)
             provider.model_name = narrow(window_text(controls.model_name));
+        if (controls.session_shape) {
+            const auto shape = SendMessageW(controls.session_shape, CB_GETCURSEL, 0, 0);
+            if (shape >= 0 && shape < static_cast<LRESULT>(std::size(session_shapes)))
+                provider.session_shape = session_shapes[shape];
+        }
         if (controls.credits) {
             provider.credit_balance = narrow(window_text(controls.credits));
             provider.available_resets = window_number(controls.earned_resets, -1);
@@ -306,6 +324,8 @@ void MockPanel::update_labels() {
         EnableWindow(controls.plan, answers);
         if (controls.model_name)
             EnableWindow(controls.model_name, answers && provider.model.present);
+        if (controls.session_shape)
+            EnableWindow(controls.session_shape, answers && provider.session.present);
         if (controls.credits) {
             EnableWindow(controls.credits, answers);
             EnableWindow(controls.earned_resets, answers);

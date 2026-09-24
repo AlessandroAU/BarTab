@@ -36,24 +36,31 @@ AccountUsage parse_claude_limits(std::string_view source) {
     AccountUsage result;
     if (root.contains("subscription_type") && root["subscription_type"].is_string())
         result.plan = root["subscription_type"].get<std::string>();
-    const auto add = [&](const nlohmann::json& window, const char* key, std::string label) {
-        if (!window.contains(key) || !window[key].is_number())
+    // Session, weekly and model windows are gathered separately so legacy fallbacks keep the display order.
+    std::vector<Allowance> session, weekly, scoped;
+    // An idle window may report a null percentage; `idle_used` then stands in for it.
+    const auto add = [](std::vector<Allowance>& into, const nlohmann::json& window, const char* key,
+                        std::string label, double idle_used = NAN) {
+        if (!window.is_object() || !window.contains(key))
             return;
-        const double used = window[key].get<double>();
+        double used = idle_used;
+        if (window[key].is_number())
+            used = window[key].get<double>();
+        else if (!window[key].is_null())
+            return;
         if (!std::isfinite(used))
             return;
-        result.windows.push_back({std::move(label),
-                                  static_cast<int>(std::lround(100 - std::clamp(used, 0.0, 100.0))),
-                                  window.contains("resets_at") ? timestamp(window["resets_at"]) : 0});
+        into.push_back({std::move(label), static_cast<int>(std::lround(100 - std::clamp(used, 0.0, 100.0))),
+                        window.contains("resets_at") ? timestamp(window["resets_at"]) : 0});
     };
     // The normalized list includes model-specific windows without duplicating legacy fields.
     if (limits.contains("limits") && limits["limits"].is_array()) {
         for (const auto& window : limits["limits"]) {
             const auto kind = window.value("kind", std::string{});
             if (kind == "session")
-                add(window, "percent", "5 hour");
+                add(session, window, "percent", "5 hour", 0);
             else if (kind == "weekly_all")
-                add(window, "percent", "Weekly");
+                add(weekly, window, "percent", "Weekly");
             else if (kind == "weekly_scoped") {
                 std::string name = "Model";
                 if (window.contains("scope") && window["scope"].is_object() &&
@@ -62,19 +69,22 @@ AccountUsage parse_claude_limits(std::string_view source) {
                     if (model.contains("display_name") && model["display_name"].is_string())
                         name = model["display_name"].get<std::string>();
                 }
-                add(window, "percent", name + " weekly");
+                add(scoped, window, "percent", name + " weekly");
             }
         }
     }
-    if (result.windows.empty()) {
-        if (limits.contains("five_hour") && limits["five_hour"].is_object())
-            add(limits["five_hour"], "utilization", "5 hour");
-        if (limits.contains("seven_day") && limits["seven_day"].is_object())
-            add(limits["seven_day"], "utilization", "Weekly");
-        if (limits.contains("model_scoped") && limits["model_scoped"].is_array())
-            for (const auto& window : limits["model_scoped"])
-                add(window, "utilization", window.value("display_name", std::string("Model")) + " weekly");
-    }
+    // Some plans leave windows out of the normalized list, so fill each missing one from the legacy fields.
+    if (session.empty() && limits.contains("five_hour"))
+        add(session, limits["five_hour"], "utilization", "5 hour");
+    if (weekly.empty() && limits.contains("seven_day"))
+        add(weekly, limits["seven_day"], "utilization", "Weekly");
+    if (scoped.empty() && limits.contains("model_scoped") && limits["model_scoped"].is_array())
+        for (const auto& window : limits["model_scoped"])
+            if (window.is_object())
+                add(scoped, window, "utilization",
+                    window.value("display_name", std::string("Model")) + " weekly");
+    for (auto* group : {&session, &weekly, &scoped})
+        result.windows.insert(result.windows.end(), group->begin(), group->end());
     if (result.windows.empty())
         throw std::runtime_error("No Claude allowance windows available");
     result.updated = std::time(nullptr);

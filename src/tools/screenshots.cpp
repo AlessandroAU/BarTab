@@ -56,6 +56,7 @@ class Shooter {
         ui::View view(surface, ui::Renderer::measure_callback, &renderer_);
         view.set_preferences(preferences);
         view.set_reference_time(session_reset - 8040);
+        view.set_pixel_scale(scale);
         view.set_hovered(hovered);
         view.set_system_light(light);
         view.set_settings_page(page_);

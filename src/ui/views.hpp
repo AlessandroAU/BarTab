@@ -111,6 +111,10 @@ class View {
     int hover_text_percent() const {
         return preferences_.appearance.hover_text_percent;
     }
+    // Device pixels per layout unit, so stacked tracks can land on whole pixels.
+    void set_pixel_scale(float value) {
+        pixel_scale_ = value > 0 ? value : 1.f;
+    }
     // Fixed clock for deterministic previews; zero uses the system clock.
     void set_reference_time(std::int64_t value) {
         reference_time_ = value;
@@ -171,6 +175,10 @@ class View {
     std::string date(std::int64_t timestamp) const;
     std::string hover_reset(std::int64_t timestamp, std::int64_t now) const;
     std::string reset_time(std::int64_t timestamp, bool date_only = false, bool day_key = false) const;
+    // A taskbar reset label: a 5 hour session resets within hours, so its time
+    // of day, or nothing while idle; any other window its date (with the time
+    // unless `date_only`).
+    std::string window_reset(const Allowance& window, bool date_only) const;
     Surface surface_;
     void* arena_{};
     Clay_Context* clay_{};
@@ -205,13 +213,18 @@ class View {
     std::deque<std::string> labels_;
     const char* label(std::string value);
     void apply_theme();
-    void live_panel(const Usage& data, Frame& result, ClayWidgets_Input input);
+    void live_panel(const Usage& all, Frame& result, ClayWidgets_Input input);
+    // The taskbar's filtered readings; kept for the frame, since text commands
+    // point into its labels until the frame is drawn.
+    Usage taskbar_data_;
     void demo_widget(const Usage& data);
     void demo_hover(const Usage& data);
     void demo_settings(Frame& result, ClayWidgets_Input input);
     void demo_details(Usage& data, Frame& result, ClayWidgets_Input input);
     void settings_panel(const Usage& data, Frame& result, ClayWidgets_Input input);
     bool interval_dropdown(const char* id, int& seconds);
+    bool measure_dropdown(const char* id, bool& used);
+    float card_label_width();
     bool setting_slider(const char* id, const char* title, int& value, SettingRange range, const char* unit);
     bool setting_toggle(const char* id, const char* title, bool& value);
     void settings_section(const char* title, bool divider);
@@ -235,6 +248,26 @@ class View {
     void text(const char* value, uint16_t size, Clay_Color tint, int text_percent = 0, bool word = false);
     void compact_bar(const char* id, const char* label, int value, std::string_view percent,
                      int text_percent = 0);
+    void bar_track(const char* id, const char* provider, const char* label, int value);
+    // A window's percentage as its provider's preference shows it: remaining, or used.
+    bool shows_used(bool claude) const {
+        return claude ? preferences_.appearance.claude_show_used : preferences_.appearance.codex_show_used;
+    }
+    int shown(int remaining, bool claude) const {
+        return shows_used(claude) ? 100 - remaining : remaining;
+    }
+    // Height of each of `count` tracks sharing one 10 pt row, and the gap between
+    // them, both whole device pixels expressed in layout units.
+    std::pair<float, float> paired_tracks(int count = 2) const;
+    // Tracks stacked in one row, re-seated on whole device pixels after layout so
+    // rounding never makes one thicker than another.
+    struct TrackStack {
+        std::vector<uint32_t> ids;
+        int height, gap; // Device pixels.
+    };
+    std::vector<TrackStack> track_stacks_;
+    float pixel_scale_{1.f};
+    void snap_track_stacks(Clay_RenderCommandArray commands) const;
     // Space between a taskbar label and its bar, and between the bar and its
     // percentage and reset date, identical in every taskbar mode. Narrow widgets
     // tighten it so their bars keep some length; placement compresses it further.
@@ -270,15 +303,25 @@ class View {
     struct WidgetColumns {
         float label{}, percent{}, reset{};
     };
-    // Optional fixed-width wrapper so stacked rows keep their columns flush.
+    // Optional fixed-width wrapper so stacked rows keep their columns flush;
+    // `centred` centres the text in the column, as the taskbar's reset dates are.
     void column_text(float width, const char* value, uint16_t size, Clay_Color tint, uint16_t left_padding = 0,
-                     bool word = false);
+                     bool word = false, bool centred = false);
     WidgetColumns widget_columns_;
     void codex_only_split(const AccountUsage& account, const Allowance& session, const Allowance& weekly);
     float frame_width_{}, frame_height_{};
-    void claude_only(const AccountUsage& account, const Allowance& weekly, const Allowance& fable);
+    // Two stacked Claude rows from an optional session, the weekly window and an
+    // optional Fable weekly; with all three, claude_three draws them.
+    void claude_only(const AccountUsage& account, const Allowance* session, const Allowance& weekly,
+                     const Allowance* fable);
+    // Claude alone with every window: three equal bar slots with a small
+    // percentage each, "Session" and "Weekly" labels, and two reset lines.
+    void claude_three(const AccountUsage& account, const Allowance& session, const Allowance& weekly,
+                      const Allowance& fable);
     void taskbar_allowance(const char* id, const char* name, const Allowance& allowance, bool stale,
                            bool show_reset = true, bool date_only = false);
-    void claude_bars(const AccountUsage& account, const Allowance& weekly, const Allowance& fable);
+    // The combined view's Claude row: weekly and Fable tracks, with the session above them when reported.
+    void claude_bars(const AccountUsage& account, const Allowance* session, const Allowance& weekly,
+                     const Allowance& fable);
 };
 } // namespace usage::ui

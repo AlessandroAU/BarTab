@@ -46,6 +46,12 @@ struct Appearance {
     int widget_height{38};
     // How opaque the panel a floating widget draws behind its text is.
     int widget_opacity{92};
+    // Which windows the taskbar draws a bar for; the hover card and settings
+    // still list every window.
+    bool codex_session_bar{true}, codex_weekly_bar{true};
+    bool claude_session_bar{true}, claude_weekly_bar{true}, claude_model_bar{true};
+    // Per provider: percentages and bar fills show how much is used rather than what remains.
+    bool codex_show_used{false}, claude_show_used{false};
     // The effective scales the layouts use.
     int taskbar_text_scale() const {
         return (text_percent * taskbar_text_base + 50) / 100;
@@ -56,7 +62,9 @@ struct Appearance {
     auto values() const {
         return std::tie(text_percent, hover_text_percent, widget_width, hover_opacity, bar_height, position,
                         show_resets, hover_enabled, twelve_hour_time, bold_taskbar, bold_hover, bold_settings,
-                        all_taskbars, widget_height, widget_opacity);
+                        all_taskbars, widget_height, widget_opacity, codex_session_bar, codex_weekly_bar,
+                        claude_session_bar, claude_weekly_bar, claude_model_bar, codex_show_used,
+                        claude_show_used);
     }
     bool operator==(const Appearance& other) const {
         return values() == other.values();

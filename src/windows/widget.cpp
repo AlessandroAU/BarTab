@@ -440,6 +440,7 @@ void App::paint_widget(HWND window) {
         // One view draws every monitor's widget; only the one under the pointer
         // shows the hover highlight.
         widget_view_.set_hovered(hovered_ && window == active().window);
+        widget_view_.set_pixel_scale(scale);
         const auto frame = widget_view_.frame(usage_, {}, bounds.right / scale, bounds.bottom / scale);
         present_layered(window, renderer_.render(frame.commands, bounds.right, bounds.bottom, scale, true));
         ++widget_frames_;

@@ -74,8 +74,12 @@ void check_reading(const AccountUsage& account, const MockProvider& provider, bo
     for (std::size_t i = 0; i < expected.size(); ++i) {
         const auto& window = account.windows[i];
         check(window.label == expected[i].label, context + ": label " + window.label);
-        check(window.remaining == 100 - expected[i].allowance->used_percent, context + ": remaining " + window.label);
-        check(window.resets_at == now + expected[i].allowance->resets_in_minutes * 60,
+        // An idle session reports nothing used and no reset time.
+        const bool idle = claude && expected[i].allowance == &provider.session &&
+                          provider.session_shape == MockSessionShape::Idle;
+        check(window.remaining == (idle ? 100 : 100 - expected[i].allowance->used_percent),
+              context + ": remaining " + window.label);
+        check(window.resets_at == (idle ? 0 : now + expected[i].allowance->resets_in_minutes * 60),
               context + ": reset time " + window.label);
     }
     if (!claude) {
@@ -93,7 +97,10 @@ const std::map<std::string, const char*> widget_layouts{
     {"Codex only: weekly", "CodexOnly"},
     {"Codex only: 5 hour", "CodexOnly"},
     {"Claude only: weekly + model", "ClaudeOnly"},
-    {"Claude only: 5 hour + weekly", "Providers"},
+    {"Claude only: 5 hour + weekly", "ClaudeOnly"},
+    {"Claude only: 5 hour + weekly + model", "ClaudeSession"},
+    {"Claude Pro: 5 hour only in legacy field", "ClaudeSession"},
+    {"Claude Pro: idle session (null percent)", "ClaudeSession"},
     {"Near the limits", "Claude"},
     {"Codex login error", "Claude"},
     {"Claude malformed reply", "Providers"},

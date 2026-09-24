@@ -473,6 +473,7 @@ void App::paint_widget() {
     const float height = static_cast<float>(widget_bounds_.height) / scale_;
     renderer_.set_surface(scale_, widget_view_.text_gamma());
     widget_view_.set_hovered(hovered_);
+    widget_view_.set_pixel_scale(scale_);
     const auto frame = widget_view_.frame(usage_, {}, width, height);
     const auto inner =
         renderer_.render(frame.commands, round(width * scale_), widget_bounds_.height, scale_, false);

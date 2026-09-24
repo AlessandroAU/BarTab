@@ -78,6 +78,10 @@ int main() {
         saved.appearance.all_taskbars = true;
         saved.appearance.widget_height = 30;
         saved.appearance.widget_opacity = 40;
+        saved.appearance.codex_weekly_bar = false;
+        saved.appearance.claude_session_bar = false;
+        saved.appearance.claude_model_bar = false;
+        saved.appearance.claude_show_used = true;
         saved.codex_enabled = false;
         saved.claude_enabled = false;
         saved.codex_interval = 45;
