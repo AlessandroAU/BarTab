@@ -83,6 +83,7 @@ App::App(bool smoke, std::shared_ptr<host::MockProviders> mock)
         providers_.detect();
         providers_.apply(preferences_);
     }
+    start_updater();
     place_widget();
     next_tick_ = Clock::now() + tick_interval;
     host::log("Started Linux host; PID " + std::to_string(getpid()) + ", scale " + std::to_string(scale_));
@@ -153,6 +154,8 @@ void App::apply_preferences(Preferences value) {
     usage_.claude_enabled = value.claude_enabled;
     apply_view_preferences();
     providers_.apply(preferences_);
+    if (updater_)
+        updater_->set_policy(value.check_updates, value.install_updates);
     if (!value.appearance.hover_enabled)
         hide_hover(true);
     place_widget();
@@ -293,6 +296,7 @@ void App::handle(const x11::Event& event) {
 
 void App::tick() {
     ++ticks_;
+    poll_updates();
     const auto update = providers_.poll();
     if (update.changed) {
         if (update.reset)
@@ -842,6 +846,10 @@ void App::render_details_frame(ClayWidgets_Input input) {
         frame.changed = true;
         providers_.refresh();
     }
+    if (frame.check_updates && updater_)
+        updater_->check_now();
+    if (frame.install_update)
+        install_update();
     if (frame.reset_all)
         reset_place_on_save_ = true;
     if (frame.save) {
@@ -950,6 +958,10 @@ void App::show_menu() {
     model.startup_enabled = startup.enabled;
     model.startup_available = startup.error.empty();
     model.debug_label = mock_ ? "Next mock scenario" : nullptr;
+    using update::State;
+    update_label_ = "Update to version " + update_status_.latest;
+    if (update_status_.state == State::Available || update_status_.state == State::Ready)
+        model.update_label = update_label_.c_str();
     menu_view_.open_menu(model);
     // Lay the menu out once in a roomy view to learn its size, then fit the window to it.
     menu_pointer_ = {};
@@ -1008,6 +1020,9 @@ void App::render_menu(ClayWidgets_Input input) {
                 host::log("Could not change Start at login: " + error);
             break;
         }
+        case Choice::Update:
+            install_update();
+            break;
         case Choice::Quit:
             host::log("Quit from the context menu.");
             running_ = false;

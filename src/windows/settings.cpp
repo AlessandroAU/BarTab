@@ -57,6 +57,8 @@ void App::apply_preferences(Preferences value) {
     usage_.claude_enabled = value.claude_enabled;
     apply_view_preferences();
     apply_providers();
+    if (updater_)
+        updater_->set_policy(value.check_updates, value.install_updates);
     if (!value.appearance.hover_enabled)
         hide_hover(true);
     tick();

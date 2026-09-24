@@ -34,11 +34,15 @@ jobs:
           New-Item -ItemType Directory $package | Out-Null
           Copy-Item bin\BarTab.exe, bin\licenses $package -Recurse
           Compress-Archive $package "$package.zip"
+          # The bare executable is what the app's self-update downloads.
+          Copy-Item bin\BarTab.exe "$package.exe"
 
       - uses: actions/upload-artifact@v5
         with:
           name: BarTab-windows-x64
-          path: BarTab-windows-x64.zip
+          path: |
+            BarTab-windows-x64.zip
+            BarTab-windows-x64.exe
           if-no-files-found: error
 
   linux:
@@ -87,11 +91,16 @@ jobs:
           mkdir "$package"
           cp -r bin/BarTab bin/licenses "$package"
           tar -czf "$package.tar.gz" "$package"
+          # The bare executable is what the app's self-update downloads; it
+          # restores the executable bit itself.
+          cp bin/BarTab "$package.bin"
 
       - uses: actions/upload-artifact@v5
         with:
           name: BarTab-linux-x64
-          path: BarTab-linux-x64.tar.gz
+          path: |
+            BarTab-linux-x64.tar.gz
+            BarTab-linux-x64.bin
           if-no-files-found: error
 
   release:
@@ -101,13 +110,49 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v5
+
+      # The app compares its CMake version with the tag to decide what is newer.
+      - name: Check the tag matches the version
+        run: |
+          version=$(sed -n 's/^project(BarTab VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "Tag $GITHUB_REF_NAME does not match CMake version $version"; exit 1; }
+
       - uses: actions/download-artifact@v5
         with:
+          path: assets
           merge-multiple: true
 
+      # Each executable is signed over its name, version and SHA-512, in the
+      # format src/core/update.cpp's signed_message() rebuilds before trusting
+      # a download. The key must be the one whose public half the app embeds.
+      - name: Sign the executables
+        working-directory: assets
+        env:
+          SIGNING_KEY: ${{ secrets.BARTAB_SIGNING_KEY }}
+        run: |
+          [ -n "$SIGNING_KEY" ] || { echo "The BARTAB_SIGNING_KEY secret is not set"; exit 1; }
+          mv BarTab-linux-x64.bin BarTab-linux-x64
+          umask 077
+          printf '%s\n' "$SIGNING_KEY" > "$RUNNER_TEMP/key.pem"
+          openssl pkey -in "$RUNNER_TEMP/key.pem" -pubout -out "$RUNNER_TEMP/public.pem"
+          embedded=$(sed -n '/release_key{/,/};/p' ../src/core/update.cpp | grep -o '0x[0-9a-f][0-9a-f]' | sed 's/0x//' | tr -d '\n')
+          actual=$(openssl pkey -pubin -in "$RUNNER_TEMP/public.pem" -outform DER | tail -c 32 | od -An -tx1 -v | tr -d ' \n')
+          [ "$embedded" = "$actual" ] || { echo "BARTAB_SIGNING_KEY does not match the key in src/core/update.cpp"; exit 1; }
+          version=${GITHUB_REF_NAME#v}
+          for asset in BarTab-windows-x64.exe BarTab-linux-x64; do
+            hash=$(sha512sum "$asset" | cut -d ' ' -f 1)
+            printf 'BarTab update v1\nasset=%s\nversion=%s\nsha512=%s\n' "$asset" "$version" "$hash" > "$RUNNER_TEMP/message"
+            openssl pkeyutl -sign -inkey "$RUNNER_TEMP/key.pem" -rawin -in "$RUNNER_TEMP/message" -out "$asset.sig"
+            openssl pkeyutl -verify -pubin -inkey "$RUNNER_TEMP/public.pem" -rawin -in "$RUNNER_TEMP/message" -sigfile "$asset.sig"
+          done
+          rm -f "$RUNNER_TEMP/key.pem"
+
       - name: Publish release
+        working-directory: assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes
           BarTab-windows-x64.zip BarTab-linux-x64.tar.gz
+          BarTab-windows-x64.exe BarTab-windows-x64.exe.sig BarTab-linux-x64 BarTab-linux-x64.sig

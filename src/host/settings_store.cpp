@@ -142,6 +142,8 @@ Preferences read_settings(const std::filesystem::path& path) {
     value.claude_enabled = read("Providers", "Claude", value.claude_enabled) != 0;
     value.codex_interval = read("Providers", "CodexInterval", value.codex_interval);
     value.claude_interval = read("Providers", "ClaudeInterval", value.claude_interval);
+    value.check_updates = read("Updates", "Check", value.check_updates) != 0;
+    value.install_updates = read("Updates", "Install", value.install_updates) != 0;
     value.normalize();
     return value;
 }
@@ -170,7 +172,7 @@ bool write_settings(const std::filesystem::path& path, Preferences value) {
             file << field.name << '=' << value.appearance.*(field.member) << '\n';
         file << "[Providers]\nCodex=" << value.codex_enabled << "\nClaude=" << value.claude_enabled
              << "\nCodexInterval=" << value.codex_interval << "\nClaudeInterval=" << value.claude_interval
-             << '\n';
+             << "\n[Updates]\nCheck=" << value.check_updates << "\nInstall=" << value.install_updates << '\n';
         file.close();
         saved = file.good() && replace_file(temporary, path);
     }

@@ -1,18 +1,21 @@
 #pragma once
 #include "host/providers.hpp"
+#include "host/simulated_update.hpp"
 #include <windows.h>
 #include <functional>
 #include <vector>
 
 namespace usage::windows {
 // The debug build's control window: picks a preset scenario or edits each
-// mocked provider's state and allowances, applying every change immediately.
+// mocked provider's state and allowances, applying every change immediately,
+// and offers a simulated release to update to.
 class MockPanel {
   public:
     // `celebrate` plays the reset animation when a simulated reset would not
-    // trigger it on its own.
+    // trigger it on its own. `simulate_update` checks a fake release server
+    // that answers with the chosen release.
     MockPanel(std::shared_ptr<host::MockProviders> providers, std::function<void()> changed,
-              std::function<void()> celebrate);
+              std::function<void()> celebrate, std::function<void(host::SimulatedRelease)> simulate_update);
     ~MockPanel();
     MockPanel(const MockPanel&) = delete;
     MockPanel& operator=(const MockPanel&) = delete;
@@ -34,7 +37,8 @@ class MockPanel {
     };
     std::shared_ptr<host::MockProviders> providers_;
     std::function<void()> changed_, celebrate_;
-    HWND window_{}, preset_{};
+    std::function<void(host::SimulatedRelease)> simulate_update_;
+    HWND window_{}, preset_{}, release_{};
     HFONT font_{};
     UINT dpi_{96};
     bool syncing_{};

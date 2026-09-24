@@ -80,7 +80,7 @@ Linux doesn't have a taskbar to sit in, so the widget floats. Drag it wherever y
 | **Taskbar** | Text size, bold text, show or hide reset dates, widget width, position on the taskbar, every monitor, bar thickness |
 | **Hover card** | Turn the card on or off, text size, bold text, opacity |
 | **Providers** | Turn Codex and Claude on or off, update interval (15 seconds to 15 minutes), usage remaining or used, which of each provider's bars the taskbar shows, connection details |
-| **General** | Bold text in Settings, 24-hour or 12-hour time, reset all settings |
+| **General** | Bold text in Settings, 24-hour or 12-hour time, update checks and automatic installs, reset all settings |
 
 Settings live in `%LOCALAPPDATA%\BarTab\settings.ini` (`~/.config/BarTab/` on Linux). If something gets messed up, start it with `run.bat --reset` or `./run.sh --reset` and you're back to the defaults.
 
@@ -88,7 +88,9 @@ BarTab used to be called UsageTracker. If you had that installed, the first time
 
 ## Privacy
 
-BarTab never goes online itself. It asks your installed CLIs for their usage numbers, and they fetch those from their own services using your existing sign-in. BarTab doesn't read or store your credentials, and it only keeps the numbers in memory.
+BarTab asks your installed CLIs for their usage numbers, and they fetch those from their own services using your existing sign-in. BarTab doesn't read or store your credentials, and it only keeps the numbers in memory.
+
+The only time BarTab goes online itself is to look for updates. Once a day it asks GitHub for the latest BarTab release; the request carries nothing but BarTab's version. When there's a newer one you get a notification and an **Update to version ...** entry in the right-click menu. Installing downloads the new executable from the GitHub release, checks its signature, swaps it in and restarts BarTab. If you'd rather it did that on its own, switch on **Install updates automatically** in General settings; if you'd rather it never went online, switch off **Check for updates**.
 
 ## Limitations
 

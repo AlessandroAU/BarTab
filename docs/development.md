@@ -128,7 +128,7 @@ Keep vendored dependencies out of formatting passes.
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-Fourteen suites run on every platform. They cover provider protocols, mock provider scenarios, process transport (framing, argument quoting, timeouts, tree cleanup), settings persistence and cancellation, CLI discovery, start at login in an isolated location, the provider session and pixel effects, placement, allowance limits, Clay layouts including each host's settings features, pointer dragging, focus, keyboard navigation, library linkage, and the upstream clay-widgets suite (566 checks). Linux adds `linux_smoke` when `xvfb-run` is installed. Checks stay active in Release builds.
+Fifteen suites run on every platform. They cover provider protocols, mock provider scenarios, process transport (framing, argument quoting, timeouts, tree cleanup), settings persistence and cancellation, CLI discovery, start at login in an isolated location, self-update (versions, the release feed, signatures made by OpenSSL as the release workflow makes them, and the updater against an in-memory release server, including a tampered download, and the debug build's simulated releases), the provider session and pixel effects, placement, allowance limits, Clay layouts including each host's settings features, pointer dragging, focus, keyboard navigation, library linkage, and the upstream clay-widgets suite (566 checks). Linux adds `linux_smoke` when `xvfb-run` is installed. Checks stay active in Release builds.
 
 On Linux, `./BarTab --smoke-test` is the X11 counterpart of the Windows smoke test below. It uses demo data, isolated `smoke-settings.ini` and `smoke-widget.ini` files beside the executable, and its own instance lock. It checks the widget, hover card open/close, click and settings, the live preview and Escape cancel, saving, position persistence and confetti. It writes `smoke-test.txt` and exits 0 on success. `ctest` runs it under Xvfb.
 
@@ -178,6 +178,25 @@ py -3 src/tools/demo_media.py hover menu   # or just some
 ```
 
 Scenes are short scripts at the end of `src/tools/demo_frames.cpp` (`move`, `click`, `drag`, `wait`, `pan`); intermediate lossless masters and the painted desktop go to `build/media/`.
+
+## Releases and updates
+
+Pushing a `v*` tag builds both platforms and publishes a GitHub release. The tag must match `project(BarTab VERSION ...)` in `CMakeLists.txt`, because that is the version the app compares releases with; the release job stops if they differ. Besides the zip and tarball, a release carries the bare executables `BarTab-windows-x64.exe` and `BarTab-linux-x64`, each with a `.sig`.
+
+The app (not the debug build) checks `https://api.github.com/repos/AlessandroAU/BarTab/releases/latest` 20 seconds after starting and then once a day, while **Check for updates** is on. A 404 means nothing is released yet. When the latest tag is newer and the release has this platform's executable and signature, settings and the right-click menu offer it and the tray (or `notify-send` on Linux) announces it once. Installing, or finding one with **Install updates automatically** on, downloads it beside the running executable as `BarTab.exe.new` and checks its signature. Installing then renames the running executable to `BarTab.exe.old` (Linux renames the new file over the old one instead), starts the new one with `--updated` and quits. `--updated` waits up to ten seconds for the old instance's lock, and the updater deletes `.old` and any unused download when it starts. Automatic installs wait until settings and the menu are closed. The code is `src/core/update.cpp` (feed, versions, signatures), `src/host/updater.cpp` (the worker thread), `src/windows/http.cpp` (WinHTTP), `src/posix/http.cpp` (the `curl` command), `src/*/self_update.cpp` (the swap and restart) and each host's `updates.cpp`.
+
+To try an update without publishing a release, use the **Update** row at the bottom of the debug build's **Mock providers** window. **Check for update** replaces the updater with one that talks to a fake release server in memory instead of GitHub, answering with the release chosen beside it, and checks at once; each request takes a moment so **Checking** and **Downloading** show in settings. **Newer release** is one minor version ahead and its executable is a copy of the running one, signed with a key made for that run, so installing it really swaps the executable and restarts. **Already up to date** offers nothing newer, **Offline** fails the check, and **Newer, bad signature** is rejected when downloaded. The code is `src/host/simulated_update.cpp`.
+
+Every download must carry an Ed25519 signature over this message, where the hash is the executable's SHA-512 in lowercase hex:
+
+```
+BarTab update v1
+asset=BarTab-windows-x64.exe
+version=1.2.3
+sha512=<hash>
+```
+
+Signing the asset name and version as well as the bytes means an older genuine build can't be served as a newer one, or one platform's as another's. The release job signs with the private key in the `BARTAB_SIGNING_KEY` repository secret (PEM, as `openssl genpkey -algorithm ed25519` writes it), checks that it matches the public key in `release_key` in `src/core/update.cpp`, and verifies each signature before publishing. To replace the key, generate a new one, put its public half (the last 32 bytes of `openssl pkey -pubout -outform DER`) in `release_key`, and update the secret. Builds that carry the old key can then no longer update themselves, so they have to be updated by hand once.
 
 ## Remaining scope
 

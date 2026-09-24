@@ -84,10 +84,15 @@ struct Preferences {
     Appearance appearance;
     bool codex_enabled{true}, claude_enabled{true};
     int codex_interval{60}, claude_interval{60};
+    // Ask GitHub once a day whether a newer release exists, and offer it.
+    bool check_updates{true};
+    // Download and install a newer release without asking, restarting BarTab.
+    bool install_updates{false};
     bool operator==(const Preferences& other) const {
         return appearance == other.appearance && codex_enabled == other.codex_enabled &&
                claude_enabled == other.claude_enabled && codex_interval == other.codex_interval &&
-               claude_interval == other.claude_interval;
+               claude_interval == other.claude_interval && check_updates == other.check_updates &&
+               install_updates == other.install_updates;
     }
     void normalize() {
         appearance.normalize();

@@ -10,15 +10,27 @@ constexpr wchar_t instance_mutex[] = L"Local\\BarTab.Prototype";
 #endif
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
-    HANDLE mutex = CreateMutexW(nullptr, FALSE, instance_mutex);
-    if (!mutex)
-        return 1;
-    if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        CloseHandle(mutex);
-        return 2;
-    }
     int argument_count{};
     auto arguments = CommandLineToArgvW(GetCommandLineW(), &argument_count);
+    bool updated = false;
+    for (int i = 1; i < argument_count; ++i)
+        if (std::wstring(arguments[i]) == L"--updated")
+            updated = true;
+    // Started by an update: the previous version is still quitting, so wait
+    // for it to let go of the instance rather than giving up at once.
+    HANDLE mutex{};
+    for (int attempt = 0;; ++attempt) {
+        mutex = CreateMutexW(nullptr, FALSE, instance_mutex);
+        if (mutex && GetLastError() != ERROR_ALREADY_EXISTS)
+            break;
+        if (mutex)
+            CloseHandle(mutex);
+        if (!mutex || !updated || attempt >= 100) {
+            LocalFree(arguments);
+            return mutex ? 2 : 1;
+        }
+        Sleep(100);
+    }
     bool smoke = false;
     bool live_test = false;
     bool reset = false;
@@ -55,7 +67,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         App app(smoke, live_test, mock);
         std::unique_ptr<MockPanel> panel;
         if (mock) {
-            panel = std::make_unique<MockPanel>(mock, [&app] { app.mock_changed(); }, [&app] { app.celebrate(); });
+            panel = std::make_unique<MockPanel>(
+                mock, [&app] { app.mock_changed(); }, [&app] { app.celebrate(); },
+                [&app](usage::host::SimulatedRelease release) { app.simulate_update(release); });
             app.set_mock_panel([&panel] { panel->show(); });
             panel->show();
         }

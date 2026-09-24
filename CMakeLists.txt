@@ -51,7 +51,7 @@ endif()
 #                   src/linux (X11, including XWayland)
 
 add_library(usage_core STATIC src/core/usage.cpp src/core/codex.cpp src/core/claude.cpp src/core/provider_protocol.cpp
-    src/core/mock_provider.cpp)
+    src/core/mock_provider.cpp src/core/update.cpp)
 target_include_directories(usage_core SYSTEM PRIVATE vendor/nlohmann)
 if(MSVC)
     target_compile_definitions(usage_core PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -138,6 +138,15 @@ if(NOT MSVC)
     set_target_properties(freetype PROPERTIES INTERPROCEDURAL_OPTIMIZATION_RELEASE OFF
                                               INTERPROCEDURAL_OPTIMIZATION_MINSIZEREL OFF)
 endif()
+# Ed25519 and SHA-512 for checking update signatures.
+add_library(monocypher STATIC vendor/monocypher/monocypher.c vendor/monocypher/monocypher-ed25519.c)
+target_include_directories(monocypher SYSTEM PUBLIC vendor/monocypher)
+target_compile_options(monocypher PRIVATE ${vendored_c_quiet})
+if(NOT MSVC)
+    set_target_properties(monocypher PROPERTIES INTERPROCEDURAL_OPTIMIZATION_RELEASE OFF
+                                                INTERPROCEDURAL_OPTIMIZATION_MINSIZEREL OFF)
+endif()
+target_link_libraries(usage_core PRIVATE monocypher)
 add_library(usage_renderer STATIC src/ui/raylib_renderer.cpp)
 target_compile_definitions(usage_renderer PRIVATE CLAY_WIDGETS_FREETYPE)
 if(WIN32)
@@ -155,19 +164,27 @@ add_library(usage_host STATIC
     src/host/service_discovery.cpp
     src/host/settings_store.cpp
     src/host/providers.cpp
+    src/host/updater.cpp
+    src/host/simulated_update.cpp
 )
 target_link_libraries(usage_host PUBLIC usage_core)
+# The simulated release server signs its fake release.
+target_link_libraries(usage_host PRIVATE monocypher)
+target_compile_definitions(usage_host PRIVATE BARTAB_VERSION="${PROJECT_VERSION}")
 if(WIN32)
     target_sources(usage_host PRIVATE
         src/windows/platform.cpp
         src/windows/process_transport.cpp
         src/windows/locations.cpp
         src/windows/startup.cpp
+        src/windows/http.cpp
+        src/windows/self_update.cpp
     )
     target_compile_definitions(usage_host PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
-    target_link_libraries(usage_host PUBLIC user32 gdi32 dwmapi advapi32)
+    target_link_libraries(usage_host PUBLIC user32 gdi32 dwmapi advapi32 winhttp)
 else()
-    target_sources(usage_host PRIVATE src/posix/process_transport.cpp src/posix/locations.cpp)
+    target_sources(usage_host PRIVATE src/posix/process_transport.cpp src/posix/locations.cpp src/posix/http.cpp
+        src/posix/self_update.cpp)
     find_package(Threads REQUIRED)
     target_link_libraries(usage_host PUBLIC Threads::Threads)
     if(APPLE)
@@ -244,6 +261,10 @@ if(BUILD_TESTING)
     target_link_libraries(host_tests PRIVATE usage_host usage_ui)
     add_test(NAME host_services COMMAND host_tests)
     set_tests_properties(host_services PROPERTIES TIMEOUT 15)
+    add_executable(update_tests tests/update_tests.cpp)
+    target_link_libraries(update_tests PRIVATE usage_host monocypher)
+    add_test(NAME self_update COMMAND update_tests)
+    set_tests_properties(self_update PROPERTIES TIMEOUT 30)
     add_executable(startup_tests tests/startup_tests.cpp)
     target_link_libraries(startup_tests PRIVATE usage_host)
     add_test(NAME startup_toggle COMMAND startup_tests)
@@ -283,6 +304,7 @@ if(WIN32)
         src/windows/menu.cpp
         src/windows/smoke_test.cpp
         src/windows/taskbar.cpp
+        src/windows/updates.cpp
     )
     target_compile_definitions(usage_windows PUBLIC UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
     target_include_directories(usage_windows PUBLIC assets)
@@ -308,6 +330,7 @@ else()
     add_library(usage_linux OBJECT
         src/linux/app.cpp
         src/linux/x11.cpp
+        src/linux/updates.cpp
     )
     target_link_libraries(usage_linux PUBLIC usage_renderer usage_host X11::X11 X11::Xext X11::Xrandr)
     add_executable(BarTab src/linux/main.cpp)
@@ -340,4 +363,5 @@ if(app_targets)
     install(FILES vendor/fonts/LICENSE.txt DESTINATION licenses RENAME roboto.txt)
     install(FILES vendor/README.md DESTINATION licenses RENAME dependencies.md)
     install(FILES vendor/nlohmann/LICENSE.MIT DESTINATION licenses RENAME nlohmann-json.txt)
+    install(FILES vendor/monocypher/LICENCE.md DESTINATION licenses RENAME monocypher.txt)
 endif()

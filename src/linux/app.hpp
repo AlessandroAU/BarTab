@@ -1,6 +1,7 @@
 #pragma once
 #include "core/settings_edit.hpp"
 #include "host/providers.hpp"
+#include "host/updater.hpp"
 #include "linux/x11.hpp"
 #include "ui/raylib_renderer.hpp"
 #include <chrono>
@@ -40,6 +41,17 @@ class App {
     std::shared_ptr<host::MockProviders> mock_;
     host::ProviderSession providers_;
     std::size_t mock_preset_{};
+    // Null in the debug build and smoke tests, which never update themselves.
+    std::unique_ptr<host::Updater> updater_;
+    update::Status update_status_;
+    // Resolved at start: once the file is replaced, /proc/self/exe no longer names it.
+    std::filesystem::path executable_;
+    // Install was chosen: once the download is verified, install and restart.
+    bool install_requested_{};
+    // The version last announced, so each is announced once.
+    std::string notified_version_;
+    // The menu's update entry, which the menu model points into.
+    std::string update_label_;
     const bool smoke_;
     const bool animations_allowed_;
     bool running_{true};
@@ -152,6 +164,13 @@ class App {
     bool animate_details();
     void present_details();
     void avoid_hover(Rect& bounds, const Rect& work);
+
+    void start_updater();
+    // Takes the updater's status each tick; installs a ready update when asked to.
+    void poll_updates();
+    // Settings' or the menu's install: download if needed, then install and restart.
+    void install_update();
+    void apply_update();
 
     // The context menu, opened at the pointer by a right click on the widget.
     void show_menu();

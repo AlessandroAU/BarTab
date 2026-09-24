@@ -7,6 +7,7 @@
 | [raylib](https://github.com/raysan5/raylib) | clay-widgets' submodule `subprojects/raylib`, bundled GLFW included | pinned by clay-widgets (`fc03d77`) | zlib; bundled licenses retained in source |
 | [FreeType](https://freetype.org) | clay-widgets' submodule `subprojects/freetype` | pinned by clay-widgets (`VER-2-14-3`) | FreeType License (FTL), chosen from its FTL/GPLv2 dual license |
 | [nlohmann/json](https://github.com/nlohmann/json) | Vendored: `nlohmann/json.hpp`, `LICENSE.MIT` | `v3.11.3` | MIT |
+| [Monocypher](https://monocypher.org) | Vendored: `monocypher/`, the library and its optional Ed25519 files, unmodified from the release tarball (SHA-256 `38d07179738c0c90677dba3ceb7a7b8496bcfea758ba1a53e803fed30ae0879c`) | `4.0.2` | BSD-2-Clause or CC0-1.0 |
 | Roboto Regular | clay-widgets' `assets/generated/embedded-font.h`; the license text is `fonts/LICENSE.txt` | from clay-widgets | Apache 2.0 (Google) |
 
 Clone with `git clone --recursive`, or run `git submodule update --init --recursive` in an existing checkout. CMake stops with that hint when the checkout is missing. Once fetched, builds need no network access.

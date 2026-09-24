@@ -3,6 +3,7 @@
 #include "windows/frame_clock.hpp"
 #include "core/settings_edit.hpp"
 #include "host/providers.hpp"
+#include "host/simulated_update.hpp"
 #include "ui/raylib_renderer.hpp"
 #include <shellapi.h>
 #include <filesystem>
@@ -43,12 +44,22 @@ class App {
     }
     // Bursts confetti out of the widget, as when a usage window resets.
     void celebrate();
+    // The debug build's panel: replaces the updater with one that talks to a
+    // fake release server answering `release`, and checks it at once.
+    void simulate_update(host::SimulatedRelease release);
 
   private:
     Usage usage_;
     std::shared_ptr<host::MockProviders> mock_;
     host::ProviderSession providers_;
     std::function<void()> open_mock_panel_;
+    // Null in smoke tests, and in the debug build until its panel simulates an update.
+    std::unique_ptr<host::Updater> updater_;
+    update::Status update_status_;
+    // Install was chosen: once the download is verified, install and restart.
+    bool install_requested_{};
+    // The version the tray last announced, so each is announced once.
+    std::string notified_version_;
     ui::Renderer renderer_;
     ui::View widget_view_{ui::Surface::Widget, ui::Renderer::measure_callback, &renderer_};
     ui::View details_view_{ui::Surface::Details, ui::Renderer::measure_callback, &renderer_};
@@ -157,6 +168,14 @@ class App {
     // `y` shifts the pixels down; the window clips whatever falls outside.
     static void paint_pixels(HWND window, const ui::Pixels& pixels, int y = 0);
     void details_event(HWND window, UINT message, WPARAM w, LPARAM l);
+    void start_updater();
+    // Takes the updater's status on the timer; installs a ready update when asked to.
+    void poll_updates();
+    // Settings' or the menu's install: download if needed, then install and restart.
+    void install_update();
+    void apply_update();
+    void notify_update();
+    void open_update_settings();
     void show_menu();
     void choose_menu(ui::Frame::MenuChoice choice);
     void open_details(bool settings = false);
