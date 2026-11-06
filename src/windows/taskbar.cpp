@@ -103,6 +103,7 @@ struct TaskbarReader::State {
     bool stop{};
     bool secondary{};
     bool poked{}, paused{};
+    unsigned long long generation{};
     Taskbars snapshot;
 };
 TaskbarReader::TaskbarReader() : state_(std::make_shared<State>()) {
@@ -118,15 +119,17 @@ TaskbarReader::TaskbarReader() : state_(std::make_shared<State>()) {
             std::chrono::steady_clock::duration gap = quickest_read;
             bool settling{};
             while (true) {
+                bool secondary{};
+                unsigned long long generation{};
                 {
-                    std::lock_guard<std::mutex> lock(state->mutex);
+                    std::unique_lock<std::mutex> lock(state->mutex);
+                    // Pokes while away are remembered, but never bypass pause.
+                    state->wake.wait(lock, [&] { return state->stop || !state->paused; });
                     if (state->stop)
                         break;
-                }
-                bool secondary{};
-                {
-                    std::lock_guard<std::mutex> lock(state->mutex);
                     secondary = state->secondary;
+                    generation = state->generation;
+                    state->poked = false;
                 }
                 Taskbars snapshot;
                 if (!automation)
@@ -146,6 +149,8 @@ TaskbarReader::TaskbarReader() : state_(std::make_shared<State>()) {
                 for (auto& other : snapshot.secondary)
                     other.captured = now;
                 std::unique_lock<std::mutex> lock(state->mutex);
+                if (generation != state->generation || state->paused)
+                    continue;
                 // An unreadable or moving layout keeps the quick pace.
                 gap = snapshot.primary.error.empty() && same_layout(snapshot, state->snapshot)
                           ? std::min<std::chrono::steady_clock::duration>(gap * 2, taskbar_slowest_read)
@@ -153,14 +158,10 @@ TaskbarReader::TaskbarReader() : state_(std::make_shared<State>()) {
                 state->snapshot = std::move(snapshot);
                 const auto wait = settling ? std::chrono::steady_clock::duration(settled_read) : gap;
                 settling = false;
-                const auto woken = [&] { return state->stop || state->poked; };
-                if (state->paused)
-                    state->wake.wait(lock, woken);
-                else
-                    state->wake.wait_for(lock, wait, woken);
+                const auto woken = [&] { return state->stop || state->paused || state->poked; };
+                state->wake.wait_for(lock, wait, woken);
                 if (state->poked) {
-                    state->wake.wait_for(lock, poke_delay, [&] { return state->stop; });
-                    state->poked = false;
+                    state->wake.wait_for(lock, poke_delay, [&] { return state->stop || state->paused; });
                     settling = true;
                 }
                 if (state->stop)
@@ -196,9 +197,21 @@ void TaskbarReader::set_paused(bool value) {
         if (state_->paused == value)
             return;
         state_->paused = value;
+        // A read interrupted by an entire pause/resume cycle is also obsolete.
+        ++state_->generation;
+        if (!value)
+            state_->poked = true;
     }
-    if (!value)
-        poke();
+    state_->wake.notify_all();
+}
+void TaskbarReader::refresh() {
+    {
+        std::lock_guard<std::mutex> lock(state_->mutex);
+        ++state_->generation;
+        state_->snapshot = {};
+        state_->poked = true;
+    }
+    state_->wake.notify_all();
 }
 void TaskbarReader::poke() {
     {

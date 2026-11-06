@@ -390,6 +390,11 @@ void App::update_theme() {
 }
 
 void App::tick() {
+    // Settings/theme notifications also call tick while the timer is stopped.
+    // An intentionally paused reader is not a stale/failed Explorer read.
+    // Leave both primary and secondary widgets alone until the session returns.
+    if (away_)
+        return;
     const auto taskbars = reader_.latest();
     const auto& snapshot = taskbars.primary;
     const auto now = std::chrono::steady_clock::now();

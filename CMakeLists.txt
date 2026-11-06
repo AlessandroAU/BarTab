@@ -247,6 +247,12 @@ if(BUILD_TESTING)
     add_executable(startup_tests tests/startup_tests.cpp)
     target_link_libraries(startup_tests PRIVATE usage_host)
     add_test(NAME startup_toggle COMMAND startup_tests)
+    if(WIN32)
+        add_executable(session_state_tests tests/session_state_tests.cpp)
+        target_include_directories(session_state_tests PRIVATE src)
+        target_compile_definitions(session_state_tests PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
+        add_test(NAME windows_session_state COMMAND session_state_tests)
+    endif()
 endif()
 
 # Regenerates the README images offscreen. Not part of the test suite: it needs

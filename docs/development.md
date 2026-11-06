@@ -48,6 +48,8 @@ The core, layouts, renderer, host services and their tests are written to build 
 
 The exact rules behind the settings and the taskbar summary.
 
+On Windows, polling pauses when the application's session is locked or disconnected, or its console display is off. Session display notifications (`GUID_SESSION_DISPLAY_STATUS`) replace physical console display notifications; connected, unlocked RDP sessions keep polling regardless of display power. Connection and lock state are queried at startup and on session transitions. On return, BarTab discards the old taskbar snapshot (including reads already in flight), recreates its widgets from a new layout, and refreshes usage. Settings/theme notifications leave widgets alone while the reader is intentionally paused. The log in `%LOCALAPPDATA%\BarTab\bartab.log` records session events and the display, connection, lock, and remote state behind each pause.
+
 Colors and the UI font follow Windows automatically. The application uses Windows app light/dark mode and accent color; the taskbar follows the separate Windows system mode. The font comes from the Windows UI message-font configuration and updates when Windows broadcasts a settings change. Provider colors stay distinct. Older saved Font, Theme, Accent, HoverWidth, and HoverDelay keys are ignored. Text size remains adjustable. Taskbar and hover text default to bold, the settings window to regular.
 
 On Linux, colors and the UI font follow the desktop instead: light/dark and the accent color from the XDG desktop portal (GNOME, KDE and others), falling back to GNOME's settings, reduced motion from GNOME's animation switch, and the UI font through fontconfig. Variable UI fonts such as GNOME's Cantarell and Adwaita Sans ship their bold as a named instance of one file; fontconfig's face index selects it, so bold text uses the family's real bold.
@@ -140,7 +142,7 @@ $smoke.ExitCode   # 0 success, 1 failure, 2 another instance running
 Get-Content .\bin\smoke-test.txt
 ```
 
-It uses an isolated `smoke-settings.ini`, stays offline, writes diagnostic bitmaps beside the executable, and exits after about eight seconds. It does not restart Explorer or change Windows settings. `--live-smoke-test` is the online variant against real signed-in providers, reporting to `bin/codex-live-test.txt`.
+It uses an isolated `smoke-settings.ini`, stays offline, writes diagnostic bitmaps beside the executable, and exits after about eight seconds (up to five seconds longer for session recovery). It also checks that a settings notification preserves the widget while polling is paused, then simulates returning to RDP with display power off and verifies fresh taskbar placement. It does not restart Explorer or change Windows settings. `windows_session_state` in CTest covers console/RDP display, lock and connection combinations and reconnect sequences. `--live-smoke-test` is the online variant against real signed-in providers, reporting to `bin/codex-live-test.txt`.
 
 Logs: `%LOCALAPPDATA%\BarTab\bartab.log` on Windows and `~/.local/state/BarTab/bartab.log` on Linux, capped at 1 MB (the oldest half is dropped when it fills). Linux settings live in `~/.config/BarTab/`. Tested on Windows 11 build 26200 at 100% scaling with MSVC 19.44, and on Debian 13 (GCC 14, GNOME 48 on Wayland through XWayland) for the Linux host.
 

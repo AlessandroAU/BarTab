@@ -3,6 +3,7 @@
 #include "windows/resource.h"
 #include "host/startup.hpp"
 #include <wtsapi32.h>
+#include <cstring>
 #include <stdexcept>
 
 namespace usage::windows {
@@ -45,10 +46,10 @@ App::App(bool smoke, bool live_test, std::shared_ptr<host::MockProviders> mock)
     update_theme();
     if (!start_timer())
         throw std::runtime_error("Could not create update timer");
+    log(L"Started native prototype; PID " + std::to_wstring(GetCurrentProcessId()));
     // Smoke tests run on the fixed timer whatever the machine's power state.
     if (!smoke && !live_test)
         watch_power();
-    log(L"Started native prototype; PID " + std::to_wstring(GetCurrentProcessId()));
 }
 
 // Loads the Windows UI font's regular and bold faces side by side, so each
@@ -166,10 +167,7 @@ LRESULT CALLBACK App::controller_proc(HWND window, UINT message, WPARAM w, LPARA
             return TRUE;
         }
         if (message == WM_WTSSESSION_CHANGE) {
-            if (w == WTS_SESSION_LOCK || w == WTS_SESSION_UNLOCK) {
-                app->locked_ = w == WTS_SESSION_LOCK;
-                app->update_power();
-            }
+            app->session_changed(static_cast<UINT>(w));
             return 0;
         }
         if (message == WM_DISPLAYCHANGE || message == WM_DPICHANGED) {
@@ -302,9 +300,66 @@ bool App::track_button(HWND window) {
 // The display notification reports the current state on registering; each
 // later change arrives as a message.
 void App::watch_power() {
+    // Registration delivers display state, but not an initial WTS connection
+    // or lock event. Query those so launching inside RDP works immediately.
+    if (!WTSRegisterSessionNotification(controller_, NOTIFY_FOR_THIS_SESSION))
+        log(L"Could not register session notifications; error " + std::to_wstring(GetLastError()));
+    query_session();
     display_notification_ =
-        RegisterPowerSettingNotification(controller_, &GUID_CONSOLE_DISPLAY_STATE, DEVICE_NOTIFY_WINDOW_HANDLE);
-    WTSRegisterSessionNotification(controller_, NOTIFY_FOR_THIS_SESSION);
+        RegisterPowerSettingNotification(controller_, &GUID_SESSION_DISPLAY_STATUS, DEVICE_NOTIFY_WINDOW_HANDLE);
+    if (!display_notification_)
+        log(L"Could not register session display notifications; error " + std::to_wstring(GetLastError()));
+    update_power();
+}
+
+void App::query_session() {
+    // Unknown/query failures retain the last known state; default to running
+    // at startup so an unavailable WTS service cannot leave the app invisible.
+    LPWSTR buffer{};
+    DWORD bytes{};
+    if (WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION,
+                                    WTSSessionInfoEx, &buffer, &bytes)) {
+        if (buffer && bytes >= sizeof(WTSINFOEXW)) {
+            const auto* info = reinterpret_cast<const WTSINFOEXW*>(buffer);
+            if (info->Level == 1) {
+                const auto& state = info->Data.WTSInfoExLevel1;
+                session_.connected = state.SessionState == WTSActive || state.SessionState == WTSConnected;
+                if (state.SessionFlags == WTS_SESSIONSTATE_LOCK || state.SessionFlags == WTS_SESSIONSTATE_UNLOCK)
+                    session_.locked = state.SessionFlags == WTS_SESSIONSTATE_LOCK;
+            }
+        }
+        WTSFreeMemory(buffer);
+    } else
+        log(L"Could not query session connection/lock state; error " + std::to_wstring(GetLastError()));
+    buffer = nullptr;
+    bytes = 0;
+    if (WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION,
+                                    WTSClientProtocolType, &buffer, &bytes)) {
+        if (buffer && bytes >= sizeof(USHORT))
+            session_.remote = *reinterpret_cast<const USHORT*>(buffer) != 0;
+        WTSFreeMemory(buffer);
+    } else
+        log(L"Could not query session protocol; error " + std::to_wstring(GetLastError()));
+}
+
+void App::session_changed(UINT event) {
+    const wchar_t* name{};
+    switch (event) {
+    case WTS_REMOTE_CONNECT: name = L"remote connect"; break;
+    case WTS_REMOTE_DISCONNECT: name = L"remote disconnect"; break;
+    case WTS_CONSOLE_CONNECT: name = L"console connect"; break;
+    case WTS_CONSOLE_DISCONNECT: name = L"console disconnect"; break;
+    case WTS_SESSION_LOCK: name = L"lock"; break;
+    case WTS_SESSION_UNLOCK: name = L"unlock"; break;
+    case WTS_SESSION_REMOTE_CONTROL: name = L"remote control changed"; break;
+    default: return;
+    }
+    log(std::wstring(L"Session event: ") + name);
+    query_session();
+    session_.change(event);
+    // Even a connection which doesn't change away_ can replace taskbar HWNDs
+    // and monitor geometry. Defer recovery while locked or disconnected.
+    session_recovery_pending_ = true;
     update_power();
 }
 
@@ -312,32 +367,60 @@ void App::power_changed(UINT event, LPARAM l) {
     if (event == PBT_POWERSETTINGCHANGE) {
         const auto* setting = reinterpret_cast<const POWERBROADCAST_SETTING*>(l);
         // 0 is off, 1 on, 2 dimmed; a dimmed display is still being looked at.
-        if (setting && setting->PowerSetting == GUID_CONSOLE_DISPLAY_STATE && setting->DataLength >= sizeof(DWORD))
-            display_on_ = *reinterpret_cast<const DWORD*>(setting->Data) != 0;
+        if (setting && setting->PowerSetting == GUID_SESSION_DISPLAY_STATUS && setting->DataLength >= sizeof(DWORD)) {
+            DWORD display{};
+            std::memcpy(&display, setting->Data, sizeof(display));
+            session_.display_on = display != 0;
+            update_power();
+        }
     }
     // Waking from sleep: whatever was read before it is out of date.
     if (event == PBT_APMRESUMEAUTOMATIC) {
-        providers_.refresh();
-        reader_.poke();
-    }
-    if (event == PBT_POWERSETTINGCHANGE)
+        query_session();
+        session_recovery_pending_ = true;
         update_power();
+    }
 }
 
 void App::update_power() {
-    const bool away = !display_on_ || locked_;
-    if (away == away_)
-        return;
-    away_ = away;
-    log(away ? L"Away: polling paused" : L"Back: polling resumed");
-    providers_.set_power(away ? host::PowerMode::Away : host::PowerMode::Normal);
-    reader_.set_paused(away);
-    // Nothing changes while away, so the update timer stops too. Its first tick
-    // back comes after the taskbar reader, just resumed, has read a fresh layout.
-    if (away)
-        KillTimer(controller_, 1);
-    else if (!start_timer())
-        log(L"Could not restart the update timer.");
+    const bool away = session_.away();
+    const auto* reason = session_.pause_reason();
+    const std::wstring state = std::wstring(reason ? reason : L"session active") +
+        L"; remote=" + (session_.remote ? L"yes" : L"no") +
+        L"; connected=" + (session_.connected ? L"yes" : L"no") +
+        L"; locked=" + (session_.locked ? L"yes" : L"no") +
+        L"; display=" + (session_.display_on ? L"on" : L"off");
+    if (power_status_ != state) {
+        log(L"Power state: " + state);
+        power_status_ = state;
+    }
+    if (away != away_) {
+        away_ = away;
+        log(away ? L"Away: polling paused (" + std::wstring(reason) + L")" : L"Back: polling resumed");
+        providers_.set_power(away ? host::PowerMode::Away : host::PowerMode::Normal);
+        reader_.set_paused(away);
+        if (away) {
+            KillTimer(controller_, 1);
+            hide_hover(true);
+        } else
+            session_recovery_pending_ = true;
+    }
+    if (!away_ && session_recovery_pending_)
+        recover_session();
+}
+
+void App::recover_session() {
+    session_recovery_pending_ = false;
+    log(L"Session active: refreshing taskbar layout and recreating widgets.");
+    // Never place a new widget from the layout captured before a reconnect.
+    // refresh also rejects an in-flight read started before this transition.
+    reader_.refresh();
+    reset_widget();
+    providers_.refresh();
+    if (!start_timer())
+        log(L"Could not restart the update timer; error " + std::to_wstring(GetLastError()));
+    if (IsWindowVisible(popup_))
+        render_details(details_pointer_);
 }
 
 // Nothing here needs to be on time to the millisecond, so Windows may batch

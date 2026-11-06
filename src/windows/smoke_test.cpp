@@ -374,6 +374,38 @@ void App::finish_smoke_test() {
     capture_widget(primary_.bounds, executable_directory() / L"small-widget.bmp");
     capture_widget(window_rect(hover_), executable_directory() / L"small-hover.bmp");
     close_details();
+
+    // Regression: a settings message after intentionally pausing the reader
+    // must not hide widgets because its cached layout is unavailable. Simulate
+    // a missing layout directly, without sleeping until the stale timeout.
+    const auto paused_window = primary_.window;
+    const auto paused_bounds = primary_.bounds;
+    const auto paused_status = status_;
+    session_.locked = true;
+    update_power();
+    reader_.refresh();
+    SendMessageW(controller_, WM_SETTINGCHANGE, 0, 0);
+    const bool paused_preserved = away_ && primary_.window == paused_window &&
+        IsWindowVisible(primary_.window) && primary_.bounds == paused_bounds && status_ == paused_status &&
+        reader_.latest().primary.captured == std::chrono::steady_clock::time_point{};
+
+    // Exercise actual host recovery using synthetic RDP state; Windows' own
+    // session is unchanged, and smoke providers remain offline.
+    session_.change(WTS_REMOTE_CONNECT);
+    session_.change(WTS_SESSION_UNLOCK);
+    session_.display_on = false;
+    update_power();
+    const bool session_resumed = !away_ && !session_recovery_pending_ && !primary_.window;
+    const auto recovery_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < recovery_deadline &&
+           reader_.latest().primary.captured == std::chrono::steady_clock::time_point{})
+        Sleep(20);
+    tick();
+    if (primary_.window)
+        UpdateWindow(primary_.window);
+    const bool session_recovered = session_resumed && primary_.window && IsWindowVisible(primary_.window) &&
+        GetParent(primary_.window) == FindWindowW(L"Shell_TrayWnd", nullptr) && !primary_.bounds.empty();
+    KillTimer(controller_, 1);
     std::ofstream report(executable_directory() / L"smoke-test.txt");
     report << std::boolalpha << "Embedded: " << embedded << "\nPopup: " << popup
            << "\nSlider updates: " << sliders << "\nKeyboard: " << keyboard
@@ -385,6 +417,8 @@ void App::finish_smoke_test() {
            << "\nDisabled provider detection retained: " << retained_detection
            << "\nProvider preview: " << provider_preview << "\nHover during preview: " << hover_preview
            << "\nAll-disabled preview: " << all_disabled_preview
+           << "\nPaused widget survives settings notification: " << paused_preserved
+           << "\nRDP session recovery: " << session_recovered
            << "\nProvider preferences saved: " << providers_saved
            << "\nProvider cancel: " << providers_cancelled << "\nClaude split bars: " << claude_split
            << "\nCompact translucent hover: " << compact_hover << "\nUnified panel: " << unified
@@ -403,7 +437,7 @@ void App::finish_smoke_test() {
                         compact_hover && providers_saved && providers_cancelled && claude_split &&
                         provider_preview && hover_preview && all_disabled_preview && font_preview &&
                         interval_preview && appearance_reset && full_cancel && retained_detection &&
-                        smaller_widths && theme_preview && report.good();
+                        smaller_widths && theme_preview && paused_preserved && session_recovered && report.good();
     report.close();
     PostQuitMessage(passed ? 0 : 1);
 }

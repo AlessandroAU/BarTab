@@ -1,6 +1,7 @@
 #pragma once
 #include "windows/taskbar.hpp"
 #include "windows/frame_clock.hpp"
+#include "windows/session_state.hpp"
 #include "core/settings_edit.hpp"
 #include "host/providers.hpp"
 #include "ui/raylib_renderer.hpp"
@@ -102,10 +103,12 @@ class App {
     UINT shell_hook_{};
     std::unordered_set<HWND> buttons_;
     bool track_button(HWND window);
-    // What the power notifications last said. Away (display off or session
-    // locked) stops every poll.
+    // Session display power, connection and lock state control background work.
     HPOWERNOTIFY display_notification_{};
-    bool display_on_{true}, locked_{}, away_{};
+    SessionState session_;
+    bool away_{};
+    bool session_recovery_pending_{};
+    std::wstring power_status_;
     std::wstring status_{L"Waiting for the taskbar."};
     bool smoke_{};
     bool demo_mode_{};
@@ -161,8 +164,11 @@ class App {
     // The update timer: takes provider readings and follows the taskbar layout.
     bool start_timer();
     void watch_power();
+    void query_session();
+    void session_changed(UINT event);
     void power_changed(UINT event, LPARAM l);
     void update_power();
+    void recover_session();
     void paint_widget(HWND window);
     float popup_scale() const;
     void close_details();
