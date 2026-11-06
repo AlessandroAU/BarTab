@@ -86,6 +86,8 @@ int main() {
         saved.claude_enabled = false;
         saved.codex_interval = 45;
         saved.claude_interval = 120;
+        saved.check_updates = false;
+        saved.install_updates = true;
         check(write_settings(path, saved), "Save creates parent directories");
         check(read_settings(path) == saved,
               "Every preference survives a round trip, including custom intervals");

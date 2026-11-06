@@ -132,6 +132,10 @@ void App::render_details_frame(ClayWidgets_Input input) {
         frame.changed = true;
         providers_.refresh();
     }
+    if (frame.check_updates && updater_)
+        updater_->check_now();
+    if (frame.install_update)
+        install_update();
     if (frame.save) {
         if (!save_settings(details_view_.preferences()))
             return;

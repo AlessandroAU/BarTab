@@ -325,6 +325,7 @@ void View::general_settings(Frame& result) {
                      ", the hover card and here use this format. Colors, accent and font family follow " +
                      features_.system_name + " settings.",
                  settings_help, {166, 187, 208, 255});
+    update_settings(result);
     settings_section("Reset", true);
     CLAY_AUTO_ID (setting_row()) {
         if (ClayWidgets_Button(widgets_.get(), CLAY_ID("ResetAll"), CLAY_STRING("Reset all settings"))) {
@@ -337,6 +338,69 @@ void View::general_settings(Frame& result) {
                      " to its default. Save keeps the reset; Cancel undoes it.",
                  settings_help, {166, 187, 208, 255});
     ClayWidgets_EndScrollPanel(widgets_.get(), CLAY_ID("GeneralScroll"));
+}
+void View::update_settings(Frame& result) {
+    using update::State;
+    const auto& status = update_status_;
+    if (status.state == State::Unavailable)
+        return;
+    settings_section("Updates", true);
+    result.changed =
+        setting_toggle("CheckUpdates", "Check for updates", preferences_.check_updates) || result.changed;
+    const bool disabled = !preferences_.check_updates && ClayWidgets_BeginDisabled(widgets_.get());
+    result.changed = setting_toggle("InstallUpdates", "Install updates automatically",
+                                    preferences_.install_updates) ||
+                     result.changed;
+    if (disabled)
+        ClayWidgets_EndDisabled(widgets_.get());
+    const auto current = "Version " + status.current;
+    std::string line;
+    const char* action = nullptr;
+    switch (status.state) {
+    case State::Unavailable:
+    case State::Off:
+    case State::Idle:
+    case State::Failed:
+        line = current + ".";
+        action = "Check now";
+        break;
+    case State::Checking:
+        line = current + ". Checking for updates...";
+        break;
+    case State::UpToDate:
+        line = current + " is the latest.";
+        action = "Check now";
+        break;
+    case State::Available:
+        line = "Version " + status.latest + " is available. You have " + status.current + ".";
+        action = "Install and restart";
+        break;
+    case State::Downloading:
+        line = "Downloading version " + status.latest + "...";
+        break;
+    case State::Ready:
+        line = "Version " + status.latest + " is downloaded and verified.";
+        action = "Restart to update";
+        break;
+    }
+    CLAY_AUTO_ID (setting_row()) {
+        text(label(line), settings_body, {236, 243, 250, 255});
+        Clay_ElementDeclaration spacer{};
+        spacer.layout.sizing.width = CLAY_SIZING_GROW(0);
+        CLAY_AUTO_ID (spacer) {}
+        if (action && ClayWidgets_Button(widgets_.get(), CLAY_ID("UpdateAction"), string(action))) {
+            if (status.state == State::Available || status.state == State::Ready)
+                result.install_update = true;
+            else
+                result.check_updates = true;
+        }
+    }
+    if (!status.error.empty())
+        wrapped_text(status.error, settings_help, {240, 180, 90, 255});
+    wrapped_text("BarTab asks GitHub for its latest release once a day. Every update is signed, and BarTab "
+                 "checks the signature before installing it. Installing restarts BarTab and discards "
+                 "unsaved changes here.",
+                 settings_help, {166, 187, 208, 255});
 }
 bool View::interval_dropdown(const char* name, int& seconds) {
     std::vector<int> values{15, 30, 60, 120, 300, 600, 900};
@@ -1770,6 +1834,11 @@ void View::context_menu(Frame& result) {
             if (disabled)
                 ClayWidgets_EndDisabled(widgets);
             ClayWidgets_MenuSeparator(widgets);
+            if (menu_.update_label) {
+                if (ClayWidgets_MenuItem(widgets, id("MenuUpdate"), string(menu_.update_label)))
+                    result.menu = Choice::Update;
+                ClayWidgets_MenuSeparator(widgets);
+            }
             if (ClayWidgets_MenuItem(widgets, id("MenuQuit"), CLAY_STRING("Quit")))
                 result.menu = Choice::Quit;
             ClayWidgets_EndContextMenu(widgets, menu);

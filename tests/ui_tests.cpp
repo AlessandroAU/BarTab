@@ -867,6 +867,38 @@ int main() {
                   settings.bounds("TextSizeSlider").width > 0 && settings.bounds("BoldTaskbar").width > 0 &&
                   settings.bounds("HoverTextSizeSlider").width == 0 && settings.bounds("EnableCodex").width == 0,
               "Settings open on the taskbar page and show only its controls");
+        {
+            usage::ui::View updates(usage::ui::Surface::Settings, measure, nullptr);
+            updates.set_settings_page(usage::ui::SettingsPage::General);
+            usage::update::Status status;
+            status.state = usage::update::State::Idle;
+            status.current = "0.3.0";
+            updates.set_update_status(status);
+            updates.frame(live, neutral(), usage::ui::settings_width, usage::ui::settings_height);
+            check(updates.bounds("CheckUpdates").height > 0 && updates.bounds("InstallUpdates").height > 0,
+                  "An enabled updater exposes both update preferences");
+            check(click_in(updates, live, "UpdateAction").check_updates, "Check now requests an update check");
+            click_in(updates, live, "InstallUpdates");
+            check(updates.preferences().install_updates, "Automatic installation can be enabled");
+            click_in(updates, live, "CheckUpdates");
+            click_in(updates, live, "InstallUpdates");
+            check(!updates.preferences().check_updates && updates.preferences().install_updates,
+                  "Disabling checks disables the auto-install control without forgetting the preference");
+            status.state = usage::update::State::Available;
+            status.latest = "0.4.0";
+            updates.set_update_status(status);
+            updates.frame(live, neutral(), usage::ui::settings_width, usage::ui::settings_height);
+            check(click_in(updates, live, "UpdateAction").install_update,
+                  "A known release can be installed explicitly even with scheduled checks off");
+            status.state = usage::update::State::Downloading;
+            updates.set_update_status(status);
+            updates.frame(live, neutral(), usage::ui::settings_width, usage::ui::settings_height);
+            check(updates.bounds("UpdateAction").height == 0, "A download cannot be started twice from settings");
+            status.state = usage::update::State::Ready;
+            updates.set_update_status(status);
+            updates.frame(live, neutral(), usage::ui::settings_width, usage::ui::settings_height);
+            check(click_in(updates, live, "UpdateAction").install_update, "A verified download offers restart");
+        }
         const auto nav = settings.bounds("SettingsNav"), page = settings.bounds("SettingsPage");
         check(nav.width > 0 && nav.x + nav.width <= page.x, "The page list sits beside the page");
         click_in(settings, live, "NavHover");

@@ -18,6 +18,13 @@ void App::show_menu() {
                 MF_STRING | (startup.enabled ? MF_CHECKED : MF_UNCHECKED) |
                     (startup.error.empty() ? 0 : MF_GRAYED),
                 static_cast<UINT_PTR>(Choice::Startup), L"Start at boot");
+    using update::State;
+    if (update_status_.state == State::Available || update_status_.state == State::Ready) {
+        const auto label = L"Update to version " + widen(update_status_.latest);
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(Choice::Update), label.c_str());
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    }
     AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(Choice::Quit), L"Quit");
     // The card, even a pinned settings preview, stays hidden while the menu is open.
     menu_open_ = true;
@@ -54,6 +61,9 @@ void App::choose_menu(ui::Frame::MenuChoice choice) {
         }
         break;
     }
+    case Choice::Update:
+        install_update();
+        break;
     case Choice::Quit:
         PostQuitMessage(0);
         break;

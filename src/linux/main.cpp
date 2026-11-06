@@ -6,6 +6,7 @@
 #include <iostream>
 #include <string>
 #include <sys/file.h>
+#include <thread>
 #include <unistd.h>
 
 namespace {
@@ -16,16 +17,22 @@ bool claim_instance(const std::string& name) {
     const std::string directory = runtime && *runtime ? runtime : "/tmp";
     const auto path = directory + "/" + name + "-" + std::to_string(getuid()) + ".lock";
     const int descriptor = open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
-    return descriptor >= 0 && flock(descriptor, LOCK_EX | LOCK_NB) == 0;
+    if (descriptor < 0)
+        return false;
+    if (flock(descriptor, LOCK_EX | LOCK_NB) == 0)
+        return true;
+    close(descriptor);
+    return false;
 }
 } // namespace
 
 int main(int argc, char** argv) {
-    bool smoke = false, reset = false;
+    bool smoke = false, reset = false, updated = false;
     for (int i = 1; i < argc; ++i) {
         const std::string argument = argv[i];
         smoke = smoke || argument == "--smoke-test";
         reset = reset || argument == "--reset";
+        updated = updated || argument == "--updated";
     }
 #ifdef BARTAB_MOCK
     // The debug build runs beside an installed copy, so it takes its own lock.
@@ -36,7 +43,14 @@ int main(int argc, char** argv) {
     // The self-test must not collide with a running copy.
     if (smoke)
         instance += "-smoke";
-    if (!claim_instance(instance)) {
+    // Started by an update: the previous version is still quitting, so wait
+    // for it to let go of the instance rather than giving up at once.
+    bool claimed = claim_instance(instance);
+    for (int attempt = 0; !claimed && updated && attempt < 100; ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        claimed = claim_instance(instance);
+    }
+    if (!claimed) {
         std::cerr << "BarTab is already running.\n";
         return 2;
     }

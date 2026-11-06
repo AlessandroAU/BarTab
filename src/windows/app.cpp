@@ -31,6 +31,7 @@ App::App(bool smoke, bool live_test, std::shared_ptr<host::MockProviders> mock)
         providers_.detect();
         apply_providers();
     }
+    start_updater();
     taskbar_created_ = RegisterWindowMessageW(L"TaskbarCreated");
     shell_hook_ = RegisterWindowMessageW(L"SHELLHOOK");
     if (RegisterShellHookWindow(controller_))
@@ -198,6 +199,7 @@ LRESULT CALLBACK App::controller_proc(HWND window, UINT message, WPARAM w, LPARA
                 if (IsWindowVisible(app->popup_))
                     app->render_details(app->details_pointer_);
             }
+            app->poll_updates();
             app->tick();
             return 0;
         }
@@ -216,6 +218,8 @@ LRESULT CALLBACK App::controller_proc(HWND window, UINT message, WPARAM w, LPARA
                 app->open_details();
             if (l == WM_RBUTTONUP || l == WM_CONTEXTMENU)
                 app->show_menu();
+            if (l == NIN_BALLOONUSERCLICK)
+                app->open_update_settings();
             return 0;
         }
     }
@@ -398,6 +402,8 @@ void App::update_power() {
         away_ = away;
         log(away ? L"Away: polling paused (" + std::wstring(reason) + L")" : L"Back: polling resumed");
         providers_.set_power(away ? host::PowerMode::Away : host::PowerMode::Normal);
+        if (updater_)
+            updater_->set_paused(away);
         reader_.set_paused(away);
         if (away) {
             KillTimer(controller_, 1);

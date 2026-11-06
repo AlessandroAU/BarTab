@@ -11,7 +11,7 @@
 namespace usage::windows {
 namespace {
 constexpr wchar_t panel_class[] = L"BarTab.MockPanel.Cpp";
-constexpr int preset_id = 900, reset_button_id = 910;
+constexpr int preset_id = 900, reset_button_id = 910, release_id = 920, update_button_id = 921;
 constexpr int state_field = 1, plan_field = 2, model_name_field = 3, credits_field = 4, earned_field = 5,
               session_shape_field = 6;
 constexpr int present_field = 10, used_field = 11, resets_field = 12;
@@ -19,9 +19,19 @@ constexpr MockState states[] = {MockState::Ready, MockState::Missing, MockState:
                                 MockState::Malformed};
 constexpr MockSessionShape session_shapes[] = {MockSessionShape::Listed, MockSessionShape::LegacyOnly,
                                                MockSessionShape::Idle};
+struct ReleaseChoice {
+    host::SimulatedRelease release;
+    const wchar_t* name;
+};
+constexpr ReleaseChoice releases[] = {{host::SimulatedRelease::Newer, L"Newer release"},
+                                      {host::SimulatedRelease::Latest, L"Already up to date"},
+                                      {host::SimulatedRelease::Offline, L"Offline"},
+                                      {host::SimulatedRelease::Tampered, L"Newer, bad signature"}};
 // Layout, in DIPs.
 constexpr int margin = 16, column_width = 330, column_gap = 20;
-constexpr int client_width = margin * 2 + column_width * 2 + column_gap, client_height = 560;
+constexpr int client_width = margin * 2 + column_width * 2 + column_gap, client_height = 600;
+// The provider columns end here; the update row sits below them.
+constexpr int columns_bottom = 514, update_top = 526;
 constexpr int allowance_top = 144, allowance_step = 86;
 
 int control_id(int provider, int field, int allowance = 0) {
@@ -67,8 +77,9 @@ std::wstring duration(int minutes) {
 } // namespace
 
 MockPanel::MockPanel(std::shared_ptr<host::MockProviders> providers, std::function<void()> changed,
-                     std::function<void()> celebrate)
-    : providers_(std::move(providers)), changed_(std::move(changed)), celebrate_(std::move(celebrate)) {
+                     std::function<void()> celebrate, std::function<void(host::SimulatedRelease)> simulate_update)
+    : providers_(std::move(providers)), changed_(std::move(changed)), celebrate_(std::move(celebrate)),
+      simulate_update_(std::move(simulate_update)) {
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_BAR_CLASSES | ICC_STANDARD_CLASSES};
     InitCommonControlsEx(&controls);
     WNDCLASSEXW cls{};
@@ -116,6 +127,10 @@ LRESULT CALLBACK MockPanel::proc(HWND window, UINT message, WPARAM w, LPARAM l) 
         const int id = LOWORD(w), code = HIWORD(w);
         if ((id == reset_button_id || id == reset_button_id + 1) && code == BN_CLICKED) {
             panel->simulate_reset(id - reset_button_id);
+        } else if (id == update_button_id && code == BN_CLICKED) {
+            const auto index = SendMessageW(panel->release_, CB_GETCURSEL, 0, 0);
+            if (index >= 0 && index < static_cast<LRESULT>(std::size(releases)))
+                panel->simulate_update_(releases[index].release);
         } else if (id == preset_id && code == CBN_SELCHANGE) {
             const auto index = SendMessageW(panel->preset_, CB_GETCURSEL, 0, 0);
             if (index >= 0 && static_cast<std::size_t>(index) < mock_presets().size()) {
@@ -166,6 +181,16 @@ void MockPanel::build() {
     SendMessageW(preset_, CB_SETCURSEL, 0, 0);
     build_provider(0, margin);
     build_provider(1, margin + column_width + column_gap);
+    // The updater talks to a fake release server instead of GitHub. Installing
+    // the newer release really replaces this executable, with a copy of itself.
+    add(WC_STATICW, L"Update", SS_LEFT, {margin, update_top + 3, margin + 70, update_top + 23});
+    release_ = add(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+                   {margin + 80, update_top, margin + 80 + 240, update_top + 150}, release_id);
+    for (const auto& choice : releases)
+        SendMessageW(release_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(choice.name));
+    SendMessageW(release_, CB_SETCURSEL, 0, 0);
+    add(WC_BUTTONW, L"Check for update", BS_PUSHBUTTON | WS_TABSTOP,
+        {margin + 330, update_top - 2, margin + 480, update_top + 26}, update_button_id);
     add(WC_STATICW,
         L"Changes apply immediately. Reset times count from each reading, so a refresh moves them forward.",
         SS_LEFT, {margin, client_height - 34, client_width - margin, client_height - 14});
@@ -175,9 +200,9 @@ void MockPanel::build_provider(int index, int left) {
     auto& controls = controls_[index];
     const bool claude = index == 1;
     const int right = left + column_width;
-    add(WC_BUTTONW, claude ? L"Claude" : L"Codex", BS_GROUPBOX, {left, 52, right, client_height - 46});
+    add(WC_BUTTONW, claude ? L"Claude" : L"Codex", BS_GROUPBOX, {left, 52, right, columns_bottom});
     add(WC_BUTTONW, L"Simulate reset", BS_PUSHBUTTON | WS_TABSTOP,
-        {left + 12, client_height - 88, left + 140, client_height - 60}, reset_button_id + index);
+        {left + 12, columns_bottom - 42, left + 140, columns_bottom - 14}, reset_button_id + index);
     add(WC_STATICW, L"State", SS_LEFT, {left + 12, 83, left + 88, 103});
     controls.state = add(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
                          {left + 90, 80, right - 12, 260}, control_id(index, state_field));

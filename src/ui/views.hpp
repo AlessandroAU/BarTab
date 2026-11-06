@@ -1,4 +1,5 @@
 #pragma once
+#include "core/update.hpp"
 #include "core/usage.hpp"
 #include <clay.h>
 #include <clay-widgets/widgets.h>
@@ -36,8 +37,12 @@ struct Frame {
     // in the preview. A host with state of its own, such as a floating widget's
     // position, resets that too when the change is saved.
     bool reset_all{};
+    // Settings' update buttons: check again now, or download (if needed),
+    // install and restart.
+    bool check_updates{};
+    bool install_update{};
     // The context menu item chosen this frame; `close` means it was dismissed.
-    enum class MenuChoice { None, Settings, Debug, Startup, Quit } menu{MenuChoice::None};
+    enum class MenuChoice { None, Settings, Debug, Startup, Update, Quit } menu{MenuChoice::None};
 };
 // What the context menu offers. Hosts without a native menu (Linux) show the
 // Menu surface in a popup window at the pointer, sized to menu_bounds().
@@ -49,6 +54,8 @@ struct MenuModel {
     bool startup_available{true};
     // An extra entry for the debug build, such as "Mock providers..."; null hides it.
     const char* debug_label{};
+    // "Update to 1.2.3" while a newer release is available; null hides it.
+    const char* update_label{};
 };
 // What the host around the views can do, so settings offer only what works there.
 struct HostFeatures {
@@ -154,6 +161,11 @@ class View {
     void set_host_features(HostFeatures value) {
         features_ = value;
     }
+    // What the updater last reported, for the General page. An Unavailable
+    // updater (the debug build) hides the Updates section.
+    void set_update_status(update::Status value) {
+        update_status_ = std::move(value);
+    }
     // Opens the context menu at the view's top-left corner. Menu frames then lay
     // it out until an item is chosen (Frame::menu) or it is dismissed (Frame::close).
     void open_menu(MenuModel model) {
@@ -199,6 +211,7 @@ class View {
     int stacked_text_limit() const { return 160 + (100 - widget_spacing_) / 5; }
     bool hovered_{};
     HostFeatures features_;
+    update::Status update_status_;
     MenuModel menu_;
     bool menu_opening_{};
     bool system_light_{};
@@ -238,6 +251,7 @@ class View {
     void providers_settings(const Usage& data, Frame& result, std::int64_t now);
     void context_menu(Frame& result);
     void general_settings(Frame& result);
+    void update_settings(Frame& result);
     void wrapped_text(const std::string& value, uint16_t size, Clay_Color tint);
     Clay_Color accent_color() const;
     Clay_Color background_color() const;
