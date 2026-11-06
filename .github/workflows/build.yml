@@ -27,22 +27,14 @@ jobs:
         shell: cmd
         run: build.bat Release
 
-      - name: Package
-        shell: pwsh
-        run: |
-          $package = "BarTab-windows-x64"
-          New-Item -ItemType Directory $package | Out-Null
-          Copy-Item bin\BarTab.exe, bin\licenses $package -Recurse
-          Compress-Archive $package "$package.zip"
-          # The bare executable is what the app's self-update downloads.
-          Copy-Item bin\BarTab.exe "$package.exe"
-
+      # GitHub wraps the artifact in a ZIP; upload the app directly so nightly
+      # downloads contain one executable and its licenses, without a nested ZIP.
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: BarTab-windows-x64
           path: |
-            BarTab-windows-x64.zip
-            BarTab-windows-x64.exe
+            bin/BarTab.exe
+            bin/licenses/
           if-no-files-found: error
 
   linux:
@@ -125,6 +117,15 @@ jobs:
         with:
           path: assets
           merge-multiple: true
+
+      - name: Package Windows release
+        working-directory: assets
+        run: |
+          mkdir BarTab-windows-x64
+          mv BarTab.exe licenses BarTab-windows-x64/
+          python3 -m zipfile -c BarTab-windows-x64.zip BarTab-windows-x64
+          # The updater needs the bare executable as a separate release asset.
+          cp BarTab-windows-x64/BarTab.exe BarTab-windows-x64.exe
 
       # Each executable is signed over its name, version and SHA-512, in the
       # format src/core/update.cpp's signed_message() rebuilds before trusting
